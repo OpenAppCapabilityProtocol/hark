@@ -30,30 +30,23 @@ carries:
 
 The registry is the single source of truth for what the device can do.
 
-## Two-Tier Resolution
+## Two-Stage Resolution
 
-Resolution runs in stages, with deterministic shortcuts at every level:
+### Stage 1 -- Intent Selection (EmbeddingGemma 308M)
 
-### Stage 0 -- Deterministic Heuristic
+The transcript is embedded using EmbeddingGemma and compared via cosine
+similarity against pre-embedded action descriptions (built from each action's
+`description`, `aliases`, `examples`, `keywords`, and parameter metadata).
 
-Keyword, alias, and example matching runs against the raw transcript. If a
-clear winner emerges (score >= 8, gap >= 3 over the runner-up), that action is
-selected directly -- no model call needed.
+Actions are ranked by semantic score. A floor of 0.30 rejects garbage matches,
+and a confidence gate at 0.35 filters ambiguous cases. Only the top-ranked
+action proceeds to slot filling.
 
-### Tier 1 -- Lean Tool Selection (~500 tokens)
+### Stage 2 -- Slot Filling (Qwen3 0.5B)
 
-The top 6 candidate actions are sent to **FunctionGemma 270M** as minimal tool
-definitions. The model picks one tool.
-
-### Tier 2 -- Parameter Extraction (~400 tokens)
-
-Only the selected tool's description and parameter definitions are sent to the
-model. It extracts parameter values from the transcript.
-
-### Deterministic Fallback
-
-At every stage, regex-based extraction handles common patterns: durations,
-alarm times, enum values, and entity snapshot lookups.
+The selected action's description and parameter definitions are sent to Qwen3.
+The model extracts parameter values (numbers, names, durations, enum choices)
+from the transcript.
 
 ## Intent Dispatch
 
@@ -85,17 +78,12 @@ without leaving Hark.
 
 ## Context Budget
 
-FunctionGemma 270M has a total usable context of roughly **2K tokens**.
+EmbeddingGemma handles intent selection via vector similarity -- no token
+budget concerns for that stage. Qwen3 receives only the selected action's
+description and parameter schema (~400 tokens).
 
-| Stage              | Budget     |
-|--------------------|------------|
-| Tier 1 (tool pick) | ~500 tokens |
-| Tier 2 (params)    | ~400 tokens |
-| OACP.md (reserved) | 300-800 tokens |
-
-`OACP.md` content is deliberately excluded from the on-device pipeline to stay
-within budget. When BYOK cloud models are supported, their larger context
-windows will accommodate the extra semantic context.
+`OACP.md` content is not currently consumed by the on-device pipeline.
+It is reserved for future BYOK cloud models with larger context windows.
 
 ## Android Assistant Integration
 

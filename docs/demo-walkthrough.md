@@ -14,7 +14,7 @@ Libre Camera was extended to expose camera actions through OACP:
 - `start_video_recording_front_camera`
 - `start_video_recording_rear_camera`
 
-These actions are declared in the app's [`oacp.json`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/assets/oacp.json).
+These actions are declared in the app's [`oacp.json`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/assets/oacp.json).
 
 ## Why activity transport is used
 
@@ -46,27 +46,27 @@ That lets Hark perform a single foreground handoff directly into Libre Camera.
 
 OACP / Hark side:
 
-- [`protocol/SPEC.md`](/Users/hark/flutter_projects/oacp/protocol/SPEC.md)
-- [`protocol/oacp.schema.json`](/Users/hark/flutter_projects/oacp/protocol/oacp.schema.json)
-- [`apps/hark/lib/services/capability_registry.dart`](/Users/hark/flutter_projects/oacp/apps/hark/lib/services/capability_registry.dart)
-- [`apps/hark/lib/services/intent_dispatcher.dart`](/Users/hark/flutter_projects/oacp/apps/hark/lib/services/intent_dispatcher.dart)
+- [`protocol/SPEC.md`](https://github.com/OpenAppCapabilityProtocol/oacp/blob/main/protocol/SPEC.md)
+- [`protocol/oacp.schema.json`](https://github.com/OpenAppCapabilityProtocol/oacp/blob/main/protocol/oacp.schema.json)
+- [`lib/services/capability_registry.dart`](../lib/services/capability_registry.dart)
+- [`lib/services/intent_dispatcher.dart`](../lib/services/intent_dispatcher.dart)
 
 Libre Camera side:
 
-- [`real-examples/librecamera/assets/oacp.json`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/assets/oacp.json)
-- [`real-examples/librecamera/assets/OACP.md`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/assets/OACP.md)
-- [`real-examples/librecamera/android/app/src/main/AndroidManifest.xml`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/android/app/src/main/AndroidManifest.xml)
-- [`real-examples/librecamera/android/app/src/main/kotlin/com/iakmds/librecamera/MainActivity.kt`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/android/app/src/main/kotlin/com/iakmds/librecamera/MainActivity.kt)
-- [`real-examples/librecamera/android/app/src/main/kotlin/com/iakmds/librecamera/OacpMetadataProvider.kt`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/android/app/src/main/kotlin/com/iakmds/librecamera/OacpMetadataProvider.kt)
-- [`real-examples/librecamera/lib/src/oacp/oacp_command_service.dart`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/lib/src/oacp/oacp_command_service.dart)
-- [`real-examples/librecamera/lib/src/pages/camera_page.dart`](/Users/hark/flutter_projects/oacp/real-examples/librecamera/lib/src/pages/camera_page.dart)
+- [`assets/oacp.json`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/assets/oacp.json)
+- [`assets/OACP.md`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/assets/OACP.md)
+- [`AndroidManifest.xml`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/android/app/src/main/AndroidManifest.xml)
+- [`MainActivity.kt`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/android/app/src/main/kotlin/com/iakmds/librecamera/MainActivity.kt)
+- [`OacpMetadataProvider.kt`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/android/app/src/main/kotlin/com/iakmds/librecamera/OacpMetadataProvider.kt)
+- [`oacp_command_service.dart`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/lib/src/oacp/oacp_command_service.dart)
+- [`camera_page.dart`](https://github.com/OpenAppCapabilityProtocol/librecamera/blob/main/lib/src/pages/camera_page.dart)
 
 ## Rebuild and install
 
 From the Libre Camera repo:
 
 ```bash
-cd /Users/hark/flutter_projects/oacp/real-examples/librecamera
+cd librecamera  # clone from https://github.com/OpenAppCapabilityProtocol/librecamera
 flutter clean
 flutter pub get
 flutter install -d <device-id>

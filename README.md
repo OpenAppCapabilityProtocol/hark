@@ -38,10 +38,8 @@ Hark does not use cloud AI. Everything runs locally on your phone:
 
 | Stage | Model | What it does |
 |-------|-------|-------------|
-| Fast path | Deterministic heuristic | Keyword/alias/example matching. Clear winners skip AI entirely (~1ms) |
-| Intent selection | [EmbeddingGemma](https://ai.google.dev/gemma/docs/core/embedding_gemma) 308M | Semantic similarity matching against all discovered capabilities |
+| Intent selection | [EmbeddingGemma](https://ai.google.dev/gemma/docs/core/embedding_gemma) 308M | Semantic similarity ranking against all discovered capabilities. Confidence-gated at 0.35. |
 | Slot filling | [Qwen3 0.5B](https://huggingface.co/Qwen/Qwen3-0.6B) | Extracts parameters (numbers, names, durations) from the matched utterance |
-| Fallback | Regex rules | Handles common patterns: times, durations, enums, entity lookups |
 
 This two-stage approach follows what production voice assistants actually use: **encoder models for classification, generative models for extraction** — not a single LLM for everything.
 
@@ -107,22 +105,32 @@ Once set, long-pressing the Home button launches Hark directly.
 
 ```
 lib/
-├── main.dart                        # Entry point
-├── models/                          # Data models (actions, manifests, resolution results)
+├── main.dart                          # Entry point
+├── models/
+│   ├── agent_manifest.dart            # OACP manifest JSON parsing
+│   ├── assistant_action.dart          # Action definitions and metadata
+│   ├── command_resolution.dart        # Resolution result types
+│   ├── discovered_app.dart            # Discovered app data model
+│   ├── discovered_app_status.dart     # Discovery state enum
+│   └── resolved_action.dart           # Intent resolution output
 ├── screens/
-│   ├── assistant_screen.dart        # Main chat UI with voice I/O
-│   ├── available_actions_screen.dart # Browse discovered capabilities
-│   └── discovered_apps_screen.dart  # View installed OACP apps
+│   ├── assistant_screen.dart          # Main chat UI with voice I/O
+│   ├── available_actions_screen.dart   # Browse discovered capabilities
+│   └── discovered_apps_screen.dart    # View installed OACP apps
 └── services/
-    ├── app_discovery_service.dart    # MethodChannel bridge to Android discovery
-    ├── capability_registry.dart      # Aggregates capabilities from all apps
-    ├── gemma_embedding_service.dart  # On-device embedding inference
-    ├── nlu_command_resolver.dart     # Two-stage NLU pipeline
-    ├── slot_filling_service.dart     # Parameter extraction via Qwen3
-    ├── intent_dispatcher.dart        # Android Intent dispatch
-    ├── oacp_result_service.dart      # Async result handling from apps
-    ├── stt_service.dart              # Speech-to-text
-    └── tts_service.dart              # Text-to-speech
+    ├── app_discovery_service.dart      # MethodChannel bridge to Android discovery
+    ├── capability_help_service.dart    # "What can you do?" query handler
+    ├── capability_registry.dart        # Aggregates capabilities from all apps
+    ├── command_resolver.dart           # Abstract resolver interface
+    ├── gemma_embedding_service.dart    # On-device embedding inference
+    ├── inference_logger.dart           # JSONL logging for debugging
+    ├── intent_dispatcher.dart          # Android Intent dispatch
+    ├── logging_command_resolver.dart   # Logging decorator for resolver
+    ├── nlu_command_resolver.dart       # Embedding-based intent ranking
+    ├── oacp_result_service.dart        # Async result handling from apps
+    ├── slot_filling_service.dart       # Parameter extraction via Qwen3
+    ├── stt_service.dart                # Speech-to-text
+    └── tts_service.dart                # Text-to-speech
 
 android/app/src/main/kotlin/com/oacp/hark/
 ├── MainActivity.kt                  # Flutter activity + MethodChannel setup

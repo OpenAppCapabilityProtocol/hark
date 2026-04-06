@@ -12,8 +12,8 @@ For the OACP protocol roadmap, see [OpenAppCapabilityProtocol/oacp](https://gith
 ## What's Working
 
 - Dynamic OACP app discovery via ContentProvider scanning
-- Two-stage on-device AI: EmbeddingGemma 308M (intent) + Qwen3 0.5B (slots)
-- Deterministic fast path with BM25 keyword/alias/example matching
+- Two-stage on-device AI: EmbeddingGemma 308M (intent selection via semantic similarity) + Qwen3 0.5B (slot filling)
+- Confidence-gated matching (semantic score >= 0.35)
 - Intent dispatch via broadcast (background) and activity (foreground)
 - Async result handling: apps return data, Hark shows + speaks it
 - System voice assistant registration (VoiceInteractionService)
@@ -105,9 +105,9 @@ Apps can return data to Hark without the user leaving:
 ### Dynamic Tool-Calling Runtime `[x]`
 
 Discovered OACP capabilities become runtime tools for the on-device model:
-- Two-tier context optimization (~500 tokens selection, ~400 tokens extraction)
-- BM25 heuristic handles clear winners instantly
-- Model only consulted for ambiguous cases
+- EmbeddingGemma ranks all candidates by semantic similarity
+- Confidence gate filters weak matches before slot filling
+- Qwen3 extracts parameters only for the selected action
 
 ### System Assistant Integration `[x]`
 

@@ -25,9 +25,8 @@ Initial public release.
 
 ### On-Device AI Pipeline
 
-- **Two-stage resolution**: EmbeddingGemma 308M for intent selection + Qwen3 0.5B for slot filling
-- **Deterministic fast path**: BM25 keyword/alias/example matching skips model for clear winners
-- **Fallback extraction**: Regex-based parameter extraction for durations, times, enums, entities
+- **Two-stage resolution**: EmbeddingGemma 308M for intent selection (semantic similarity) + Qwen3 0.5B for slot filling
+- **Confidence gating**: Semantic score floor (0.30) and confidence threshold (0.35) filter weak/ambiguous matches
 - Multi-model support: switchable between models from Local Models screen
 - Persistent model backup to `Downloads/local-llm/` with auto-restore on reinstall
 - Inference logging (JSONL) for debugging and model comparison

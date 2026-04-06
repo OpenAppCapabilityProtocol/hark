@@ -35,4 +35,4 @@ Hark uses Android's standard security mechanisms:
 - **App discovery**: Read-only ContentProvider queries. Hark cannot modify other apps' data.
 - **Intent dispatch**: Uses Android's standard Intent system with explicit component targeting. Apps must declare `exported="true"` receivers to be invocable.
 - **Model storage**: Model files are stored in app-private storage with backup to `Downloads/local-llm/`. No credential or user data is stored alongside models.
-- **Permissions**: `RECORD_AUDIO` for voice input, `QUERY_ALL_PACKAGES` for app discovery. No network permission is required for core functionality.
+- **Permissions**: `RECORD_AUDIO` for voice input, `QUERY_ALL_PACKAGES` for app discovery. `INTERNET` is present in the manifest for model downloads and Android's cloud-backed SpeechRecognizer, but the core OACP resolution and dispatch path does not require network access.

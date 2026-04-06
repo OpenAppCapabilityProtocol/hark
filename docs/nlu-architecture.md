@@ -1,8 +1,8 @@
 # Hark NLU Architecture — Intent Routing Design
 
-> Status: In progress — NLU-first resolver is implemented; embedding/ONNX classifier is still pending
+> Status: Implemented — EmbeddingGemma 308M replaced all-MiniLM-L6-v2 and FunctionGemma for intent routing
 > Created: 2026-03-30
-> Replaces: the FunctionGemma-as-router approach in `LocalGemmaResolver`
+> History: This doc was written as a design proposal. The architecture was adopted with EmbeddingGemma (instead of all-MiniLM-L6-v2) and Qwen3 for slot filling (instead of regex-only). Read as a design rationale document, not current API docs.
 
 ---
 
