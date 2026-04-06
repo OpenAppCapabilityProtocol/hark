@@ -1,0 +1,33 @@
+name: hark
+description: "Open-source voice assistant built on OACP. Discovers and controls Android apps using on-device AI."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  speech_to_text: ^7.3.0
+  flutter_tts: ^4.2.5
+  android_intent_plus: ^6.0.0
+  permission_handler: ^12.0.1
+  flutter_embedder: ^0.1.7
+  flutter_gemma: ^0.13.0
+  shared_preferences: ^2.5.0
+  path_provider: ^2.1.0
+
+dependency_overrides:
+  # flutter_embedder v0.1.7 was built with codegen v2.11.1 but pub resolves
+  # the runtime to 2.12.0. Pin to match codegen until flutter_embedder updates.
+  flutter_rust_bridge: 2.11.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

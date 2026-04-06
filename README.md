@@ -1,0 +1,173 @@
+# Hark
+
+**An open-source voice assistant that discovers and controls Android apps using on-device AI.**
+
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Protocol](https://img.shields.io/badge/OACP-v0.3--preview-green)](https://github.com/OpenAppCapabilityProtocol/oacp)
+[![Flutter](https://img.shields.io/badge/Flutter-3.11+-02569B.svg)](https://flutter.dev)
+
+---
+
+> The name "Hark" means *"to listen"*.
+
+Hark is the reference voice assistant for [OACP](https://github.com/OpenAppCapabilityProtocol/oacp) (Open App Capability Protocol). It discovers what your installed apps can do and lets you control them by voice — entirely on-device, no cloud, no account, no data collection.
+
+```
+"Hey Hark, what's the weather?"
+    -> discovers Breezy Weather's OACP capabilities
+    -> dispatches broadcast intent
+    -> app returns data in background
+    -> Hark speaks: "Currently 22 degrees, partly cloudy"
+```
+
+---
+
+## How It Works
+
+1. **Listen** — On-device speech-to-text captures your voice command
+2. **Discover** — Scans installed apps for OACP capability manifests via Android ContentProvider
+3. **Resolve** — Two-stage on-device AI pipeline matches your command to the right app action and extracts parameters
+4. **Dispatch** — Fires an Android Intent to the target app (broadcast for background, activity for foreground)
+5. **Respond** — Receives async results from the app, shows them in chat, and speaks them aloud
+
+The user never leaves Hark. Apps do the work in the background and send results back.
+
+## On-Device AI Pipeline
+
+Hark does not use cloud AI. Everything runs locally on your phone:
+
+| Stage | Model | What it does |
+|-------|-------|-------------|
+| Fast path | Deterministic heuristic | Keyword/alias/example matching. Clear winners skip AI entirely (~1ms) |
+| Intent selection | [EmbeddingGemma](https://ai.google.dev/gemma/docs/core/embedding_gemma) 308M | Semantic similarity matching against all discovered capabilities |
+| Slot filling | [Qwen3 0.5B](https://huggingface.co/Qwen/Qwen3-0.6B) | Extracts parameters (numbers, names, durations) from the matched utterance |
+| Fallback | Regex rules | Handles common patterns: times, durations, enums, entity lookups |
+
+This two-stage approach follows what production voice assistants actually use: **encoder models for classification, generative models for extraction** — not a single LLM for everything.
+
+## OACP-Enabled Apps
+
+Hark works with any app that implements OACP. These are tested and working today:
+
+| App | What you can do |
+|-----|----------------|
+| [Breezy Weather](https://github.com/OpenAppCapabilityProtocol/breezy-weather) | "What's the weather?" — async result spoken back |
+| [Binary Eye](https://github.com/OpenAppCapabilityProtocol/BinaryEye) | "Open the QR scanner" / "Create QR code for hello world" |
+| [Voice Recorder](https://github.com/OpenAppCapabilityProtocol/Voice-Recorder) | "Start audio recording" |
+| [Libre Camera](https://github.com/OpenAppCapabilityProtocol/librecamera) | "Take a selfie in 5 seconds" — camera opens in selfie mode |
+| [Wikipedia](https://github.com/OpenAppCapabilityProtocol/apps-android-wikipedia) | "Search Wikipedia for Flutter" |
+| [ArchiveTune](https://github.com/OpenAppCapabilityProtocol/ArchiveTune) | "Play Lonely by Akon" — music playback by voice |
+
+Each is a fork showing exactly what was added to support OACP. Check the diff against upstream to see how simple the integration is.
+
+Want to add OACP to your own app? See the [OACP Getting Started Guide](https://github.com/OpenAppCapabilityProtocol/oacp/blob/main/docs/getting-started.md).
+
+## Android Assistant Integration
+
+Hark can register as your device's default voice assistant:
+
+- **Long-press Home** or assistant gesture launches Hark and auto-starts listening
+- Implements Android's `VoiceInteractionService` framework
+- Continuous listening mode: mic auto-restarts after each command
+- Uses `RoleManager` on Android 10+ to request ROLE_ASSISTANT
+
+## Getting Started
+
+### Prerequisites
+
+- Flutter SDK (stable channel, >= 3.11)
+- Android device (physical device strongly recommended — emulators lack microphone, GPU, and some intent features)
+- ~500MB free storage for on-device AI models
+
+### Build and run
+
+```bash
+git clone https://github.com/OpenAppCapabilityProtocol/hark.git
+cd hark
+flutter pub get
+flutter run
+```
+
+### First launch
+
+1. Grant microphone permission when prompted
+2. Download the on-device models from the Local Models screen (EmbeddingGemma + Qwen3)
+3. Install any OACP-enabled app (see list above)
+4. Tap the mic and try a voice command
+
+### Set as default assistant (optional)
+
+Hark will prompt you to set it as the default assistant on first launch. You can also do this manually:
+
+**Settings > Apps > Default apps > Digital assistant app > Hark**
+
+Once set, long-pressing the Home button launches Hark directly.
+
+## Project Structure
+
+```
+lib/
+├── main.dart                        # Entry point
+├── models/                          # Data models (actions, manifests, resolution results)
+├── screens/
+│   ├── assistant_screen.dart        # Main chat UI with voice I/O
+│   ├── available_actions_screen.dart # Browse discovered capabilities
+│   └── discovered_apps_screen.dart  # View installed OACP apps
+└── services/
+    ├── app_discovery_service.dart    # MethodChannel bridge to Android discovery
+    ├── capability_registry.dart      # Aggregates capabilities from all apps
+    ├── gemma_embedding_service.dart  # On-device embedding inference
+    ├── nlu_command_resolver.dart     # Two-stage NLU pipeline
+    ├── slot_filling_service.dart     # Parameter extraction via Qwen3
+    ├── intent_dispatcher.dart        # Android Intent dispatch
+    ├── oacp_result_service.dart      # Async result handling from apps
+    ├── stt_service.dart              # Speech-to-text
+    └── tts_service.dart              # Text-to-speech
+
+android/app/src/main/kotlin/com/oacp/hark/
+├── MainActivity.kt                  # Flutter activity + MethodChannel setup
+├── OacpDiscoveryHandler.kt          # Scans for OACP ContentProviders
+├── OacpResultReceiver.kt            # BroadcastReceiver for async results
+├── LocalModelStorageHandler.kt      # Persistent model backup/restore
+├── HarkVoiceInteractionService.kt   # System assistant service
+├── HarkSessionService.kt            # Voice interaction session factory
+├── HarkSession.kt                   # Session lifecycle
+└── HarkRecognitionService.kt        # Recognition service stub
+```
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — How Hark works: discovery, resolution, dispatch, async results
+- [NLU Architecture](docs/nlu-architecture.md) — Design rationale for the two-stage AI pipeline
+- [On-Device LLM Research](docs/on-device-llm-research.md) — Model evaluation and selection decisions
+- [Demo Walkthrough](docs/demo-walkthrough.md) — Step-by-step Libre Camera integration demo
+- [Tool-Calling Runtime](docs/tool-calling-runtime.md) — Dynamic tool generation from OACP capabilities
+
+## OACP Protocol
+
+Hark is one implementation of OACP. The protocol is independent — any assistant can consume it.
+
+| | |
+|---|---|
+| **Protocol spec** | [OpenAppCapabilityProtocol/oacp](https://github.com/OpenAppCapabilityProtocol/oacp) |
+| **Android SDK** | [OpenAppCapabilityProtocol/oacp-android-sdk](https://github.com/OpenAppCapabilityProtocol/oacp-android-sdk) |
+| **Organization** | [github.com/OpenAppCapabilityProtocol](https://github.com/OpenAppCapabilityProtocol) |
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the full plan. Key priorities:
+
+- **Self-hosted inference** — Connect Hark to Ollama/LM Studio on your local network for unlimited context and OACP.md consumption
+- **BYOK cloud** — Bring your own API key for OpenAI, Gemini, Anthropic
+- **Better STT** — Evaluate whisper.cpp / sherpa-onnx for on-device speech recognition
+- **Assistant overlay** — Lightweight UI on top of current app (like Claude/ChatGPT)
+- **Wake word** — "Hey Hark" activation without touching the phone
+- **Gemma 4** — Single-model replacement for the two-stage pipeline when flutter_gemma supports it
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).
