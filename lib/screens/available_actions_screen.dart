@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/assistant_action.dart';
+import '../state/registry_provider.dart';
 
-class AvailableActionsScreen extends StatefulWidget {
-  const AvailableActionsScreen({required this.actions, super.key});
-
-  final List<AssistantAction> actions;
+class AvailableActionsScreen extends ConsumerStatefulWidget {
+  const AvailableActionsScreen({super.key});
 
   @override
-  State<AvailableActionsScreen> createState() => _AvailableActionsScreenState();
+  ConsumerState<AvailableActionsScreen> createState() =>
+      _AvailableActionsScreenState();
 }
 
-class _AvailableActionsScreenState extends State<AvailableActionsScreen> {
+class _AvailableActionsScreenState
+    extends ConsumerState<AvailableActionsScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -23,61 +25,77 @@ class _AvailableActionsScreenState extends State<AvailableActionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = _buildOacpGroups(widget.actions, _searchQuery);
+    final registry = ref.watch(capabilityRegistryProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Available Actions')),
-      body: widget.actions.isEmpty
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'No OACP actions are currently available.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _IntroCard(
-                  actionCount: widget.actions.length,
-                  integrationCount: groups.length,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _searchController,
-                  decoration: const InputDecoration(
-                    hintText:
-                        'Filter by app, package, action, or description...',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value.trim().toLowerCase();
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
-                const _SectionTitle(
-                  title: 'OACP Integrations',
-                  subtitle:
-                      'This is Hark’s executable OACP catalog. Discovery Diagnostics stays separate and only shows raw provider metadata.',
-                ),
-                const SizedBox(height: 12),
-                if (groups.isEmpty)
-                  const Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('No OACP actions match the current filter.'),
-                    ),
-                  )
-                else
-                  ...groups.map((group) => _ActionGroupCard(group: group)),
-              ],
+      body: registry.when(
+        data: (registry) => _buildBody(context, registry.actions),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text('Could not load capabilities:\n$error'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, List<AssistantAction> actions) {
+    final groups = _buildOacpGroups(actions, _searchQuery);
+
+    if (actions.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No OACP actions are currently available.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _IntroCard(
+          actionCount: actions.length,
+          integrationCount: groups.length,
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _searchController,
+          decoration: const InputDecoration(
+            hintText: 'Filter by app, package, action, or description...',
+            prefixIcon: Icon(Icons.search),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          onChanged: (value) {
+            setState(() {
+              _searchQuery = value.trim().toLowerCase();
+            });
+          },
+        ),
+        const SizedBox(height: 16),
+        const _SectionTitle(
+          title: 'OACP Integrations',
+          subtitle:
+              'This is Hark’s executable OACP catalog. The dedicated diagnostics screen has been removed — this view is authoritative.',
+        ),
+        const SizedBox(height: 12),
+        if (groups.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No OACP actions match the current filter.'),
             ),
+          )
+        else
+          ...groups.map((group) => _ActionGroupCard(group: group)),
+      ],
     );
   }
 

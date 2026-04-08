@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
-import 'screens/splash_gate.dart';
+import 'router/hark_router.dart';
 import 'theme/hark_theme.dart';
 
 Future<void> main() async {
@@ -10,13 +10,14 @@ Future<void> main() async {
   runApp(const ProviderScope(child: HarkApp()));
 }
 
-class HarkApp extends StatelessWidget {
+class HarkApp extends ConsumerWidget {
   const HarkApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = buildHarkTheme();
-    return MaterialApp(
+    final router = ref.watch(goRouterProvider);
+    return MaterialApp.router(
       title: 'Hark',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: FLocalizations.localizationsDelegates,
@@ -26,7 +27,7 @@ class HarkApp extends StatelessWidget {
         data: theme,
         child: FToaster(child: child!),
       ),
-      home: const SplashGate(),
+      routerConfig: router,
     );
   }
 }

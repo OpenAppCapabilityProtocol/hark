@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/command_resolution.dart';
-import '../models/discovered_app_status.dart';
 import '../models/resolved_action.dart';
 import '../services/capability_help_service.dart';
 import '../services/capability_registry.dart';
@@ -22,8 +21,9 @@ import '../state/registry_provider.dart';
 import '../state/resolver_provider.dart';
 import '../state/services_providers.dart';
 import '../state/slot_filling_notifier.dart';
-import 'available_actions_screen.dart';
-import 'discovered_apps_screen.dart';
+import 'package:go_router/go_router.dart';
+
+import '../router/hark_router.dart';
 
 class AssistantScreen extends ConsumerStatefulWidget {
   const AssistantScreen({super.key});
@@ -119,17 +119,6 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
         _statusText = _idleStatusText();
       });
     }
-  }
-
-  Future<List<DiscoveredAppStatus>> _refreshDiscoveredApps() async {
-    await _capabilityRegistry.initialize();
-    _intentDispatcher = IntentDispatcher(_capabilityRegistry);
-    if (mounted) {
-      setState(() {
-        _statusText = _idleStatusText();
-      });
-    }
-    return _capabilityRegistry.appStatuses;
   }
 
   Future<void> _onMicPressed() async {
@@ -528,28 +517,9 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
         centerTitle: true,
         actions: [
           IconButton(
-            onPressed: () {
-              final actions = _capabilityRegistry.actions;
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AvailableActionsScreen(actions: actions),
-                ),
-              );
-            },
+            onPressed: () => context.push(HarkRoutes.actions),
             icon: const Icon(Icons.list_alt),
             tooltip: 'Available actions',
-          ),
-          IconButton(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      DiscoveredAppsScreen(onRefresh: _refreshDiscoveredApps),
-                ),
-              );
-            },
-            icon: const Icon(Icons.apps),
-            tooltip: 'Discovery diagnostics',
           ),
         ],
       ),
