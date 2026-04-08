@@ -1,14 +1,20 @@
 import '../models/assistant_action.dart';
 import '../models/command_resolution.dart';
 import 'command_resolver.dart';
-import 'gemma_embedding_service.dart';
 import 'inference_logger.dart';
 
 class LoggingCommandResolver implements CommandResolver {
+  LoggingCommandResolver(
+    this._delegate,
+    this._logger, {
+    required this.fallbackModelId,
+  });
+
   final CommandResolver _delegate;
   final InferenceLogger _logger;
 
-  LoggingCommandResolver(this._delegate, this._logger);
+  /// Model id used when the delegate did not surface one on the result.
+  final String fallbackModelId;
 
   @override
   void initialize() => _delegate.initialize();
@@ -24,7 +30,7 @@ class LoggingCommandResolver implements CommandResolver {
 
     await _logger.log(InferenceLogEntry(
       timestamp: DateTime.now(),
-      modelId: result.modelId ?? GemmaEmbeddingService.modelId,
+      modelId: result.modelId ?? fallbackModelId,
       transcript: transcript,
       actionCount: actions.length,
       success: result.isSuccess,

@@ -1,26 +1,33 @@
 import 'package:flutter/material.dart';
-import 'screens/assistant_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:forui/forui.dart';
+
+import 'router/hark_router.dart';
+import 'theme/hark_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const AssistantApp());
+  runApp(const ProviderScope(child: HarkApp()));
 }
 
-class AssistantApp extends StatelessWidget {
-  const AssistantApp({super.key});
+class HarkApp extends ConsumerWidget {
+  const HarkApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'OACP Assistant',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = buildHarkTheme();
+    final router = ref.watch(goRouterProvider);
+    return MaterialApp.router(
+      title: 'Hark',
+      debugShowCheckedModeBanner: false,
+      localizationsDelegates: FLocalizations.localizationsDelegates,
+      supportedLocales: FLocalizations.supportedLocales,
+      theme: theme.toApproximateMaterialTheme(),
+      builder: (_, child) => FTheme(
+        data: theme,
+        child: FToaster(child: child!),
       ),
-      home: const AssistantScreen(),
+      routerConfig: router,
     );
   }
 }

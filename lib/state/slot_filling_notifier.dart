@@ -3,56 +3,93 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/assistant_action.dart';
 
+/// Lifecycle stages of the slot-filling model — identical to the values
+/// exposed by the legacy [SlotFillingService] so the splash screen can keep
+/// using the same status keys during the Riverpod migration.
 enum SlotFillingStage { idle, downloading, loading, ready, failed }
 
+/// Immutable state container for [SlotFillingNotifier].
+///
+/// Holds the current stage, a human-readable status message, an optional
+/// download progress value in the `[0, 1]` range, and the live
+/// [InferenceModel] handle once the model has been loaded.
+@immutable
 class SlotFillingState {
   const SlotFillingState({
     required this.stage,
     required this.message,
     this.progress,
+    this.model,
   });
 
   final SlotFillingStage stage;
   final String message;
   final double? progress;
+  final InferenceModel? model;
 
-  bool get isReady => stage == SlotFillingStage.ready;
+  bool get isReady => stage == SlotFillingStage.ready && model != null;
   bool get isBusy =>
       stage == SlotFillingStage.downloading ||
       stage == SlotFillingStage.loading;
+
+  SlotFillingState copyWith({
+    SlotFillingStage? stage,
+    String? message,
+    double? progress,
+    bool clearProgress = false,
+    InferenceModel? model,
+    bool clearModel = false,
+  }) {
+    return SlotFillingState(
+      stage: stage ?? this.stage,
+      message: message ?? this.message,
+      progress: clearProgress ? null : (progress ?? this.progress),
+      model: clearModel ? null : (model ?? this.model),
+    );
+  }
 }
 
-class SlotFillingService extends ChangeNotifier {
+/// Riverpod 3.x [Notifier] that owns the Qwen3 0.6B slot-filling runtime.
+///
+/// Behavior, prompt template, JSON parsing, progress messages, and Qwen3
+/// model coordinates are all preserved from the prior implementation so the
+/// splash screen and downstream callers have no observable differences.
+class SlotFillingNotifier extends Notifier<SlotFillingState> {
   static const modelUrl =
       'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm';
   static const modelId = 'Qwen3-0.6B';
 
-  InferenceModel? _model;
   Future<void>? _initFuture;
   bool _disposed = false;
-  SlotFillingState _state = const SlotFillingState(
-    stage: SlotFillingStage.idle,
-    message: 'Preparing slot-filling model...',
-  );
-
-  SlotFillingState get state => _state;
-  bool get isReady => _model != null;
 
   @override
-  void dispose() {
-    _disposed = true;
-    _model?.close();
-    _model = null;
-    _initFuture = null;
-    super.dispose();
+  SlotFillingState build() {
+    ref.onDispose(() {
+      _disposed = true;
+      // Close the model handle if one was ever loaded. We read from `state`
+      // rather than a stored field so there is a single source of truth.
+      state.model?.close();
+      _initFuture = null;
+    });
+
+    // Kick off initialization on first read.
+    Future.microtask(() {
+      if (_disposed) return;
+      _initFuture ??= _initialize();
+    });
+
+    return const SlotFillingState(
+      stage: SlotFillingStage.idle,
+      message: 'Preparing slot-filling model...',
+    );
   }
 
-  Future<void> prewarm() async {
-    await (_initFuture ??= _initialize());
-  }
+  /// True when the model has been fully loaded and is ready for inference.
+  bool get isReady => state.model != null;
 
   /// Extract parameters from a voice transcript given a matched action.
   ///
@@ -63,7 +100,7 @@ class SlotFillingService extends ChangeNotifier {
     required AssistantAction action,
   }) async {
     await (_initFuture ??= _initialize());
-    final model = _model;
+    final model = state.model;
     if (model == null || _disposed) {
       throw StateError('Slot-filling model is not available');
     }
@@ -106,8 +143,8 @@ class SlotFillingService extends ChangeNotifier {
         await session.close();
       }
     } catch (error, stackTrace) {
-      debugPrint('SlotFillingService: inference failed: $error');
-      debugPrint('SlotFillingService: $stackTrace');
+      debugPrint('SlotFillingNotifier: inference failed: $error');
+      debugPrint('SlotFillingNotifier: $stackTrace');
       return null;
     }
   }
@@ -275,7 +312,7 @@ class SlotFillingService extends ChangeNotifier {
 
   Future<void> _initialize() async {
     try {
-      debugPrint('SlotFillingService: starting initialization...');
+      debugPrint('SlotFillingNotifier: starting initialization...');
       _setState(const SlotFillingState(
         stage: SlotFillingStage.loading,
         message: 'Initializing slot-filling runtime...',
@@ -285,7 +322,8 @@ class SlotFillingService extends ChangeNotifier {
 
       // Check if model is already installed.
       if (FlutterGemma.hasActiveModel()) {
-        debugPrint('SlotFillingService: model already installed, loading...');
+        debugPrint(
+            'SlotFillingNotifier: model already installed, loading...');
         _setState(const SlotFillingState(
           stage: SlotFillingStage.loading,
           message: 'Loading Qwen3 from cache...',
@@ -298,15 +336,15 @@ class SlotFillingService extends ChangeNotifier {
           progress: 0,
         ));
 
-        debugPrint('SlotFillingService: downloading model from $modelUrl');
+        debugPrint('SlotFillingNotifier: downloading model from $modelUrl');
         await FlutterGemma.installModel(
-                modelType: ModelType.qwen,
-                fileType: ModelFileType.litertlm,
-            )
+          modelType: ModelType.qwen,
+          fileType: ModelFileType.litertlm,
+        )
             .fromNetwork(modelUrl)
             .withProgress((pct) {
           if (pct % 5 == 0) {
-            debugPrint('SlotFillingService: download $pct%');
+            debugPrint('SlotFillingNotifier: download $pct%');
           }
           _setState(SlotFillingState(
             stage: SlotFillingStage.downloading,
@@ -318,16 +356,22 @@ class SlotFillingService extends ChangeNotifier {
 
       // Create the model with small context — slot filling needs very little.
       final model = await FlutterGemma.getActiveModel(maxTokens: 512);
-      _model = model;
 
-      debugPrint('SlotFillingService: model loaded successfully!');
-      _setState(const SlotFillingState(
+      if (_disposed) {
+        // A dispose happened while awaiting the model — don't leak it.
+        await model.close();
+        return;
+      }
+
+      debugPrint('SlotFillingNotifier: model loaded successfully!');
+      _setState(SlotFillingState(
         stage: SlotFillingStage.ready,
         message: 'Qwen3 ready',
+        model: model,
       ));
     } catch (error, stackTrace) {
-      debugPrint('SlotFillingService: failed to initialize: $error');
-      debugPrint('SlotFillingService: $stackTrace');
+      debugPrint('SlotFillingNotifier: failed to initialize: $error');
+      debugPrint('SlotFillingNotifier: $stackTrace');
       _setState(SlotFillingState(
         stage: SlotFillingStage.failed,
         message: 'Slot-filling model failed: $error',
@@ -338,13 +382,14 @@ class SlotFillingService extends ChangeNotifier {
 
   void _setState(SlotFillingState next) {
     if (_disposed) return;
-    if (_state.stage == next.stage &&
-        _state.message == next.message &&
-        (_state.progress ?? -1) == (next.progress ?? -1)) {
+    final current = state;
+    if (current.stage == next.stage &&
+        current.message == next.message &&
+        (current.progress ?? -1) == (next.progress ?? -1) &&
+        identical(current.model, next.model)) {
       return;
     }
-    _state = next;
-    notifyListeners();
+    state = next;
   }
 
   void _debugLog(String event, Map<String, Object?> payload) {
@@ -353,3 +398,9 @@ class SlotFillingService extends ChangeNotifier {
     developer.log(encoded, name: 'HarkSlotFill');
   }
 }
+
+/// Riverpod provider that exposes the [SlotFillingNotifier] and its state.
+final slotFillingProvider =
+    NotifierProvider<SlotFillingNotifier, SlotFillingState>(
+  SlotFillingNotifier.new,
+);

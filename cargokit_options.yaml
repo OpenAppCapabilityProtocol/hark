@@ -1,0 +1,14 @@
+# Opt into precompiled binaries for Rust-backed Flutter plugins (cargokit).
+#
+# Without this file, cargokit defaults to: "use precompiled only if rustup
+# is NOT installed". Since the Hark dev machine has rustup, it falls back to
+# source-building flutter_embedder for every Android ABI on each clean
+# build, which takes several minutes.
+#
+# Precompiled binaries are downloaded from the flutter_embedder mirror
+# referenced in `rust/cargokit.yaml` inside that package, and verified
+# against its embedded public key before use. Signed builds only.
+#
+# If you ever need to patch the Rust side of flutter_embedder locally,
+# flip this to `false` (or delete this file) to fall back to source build.
+use_precompiled_binaries: true

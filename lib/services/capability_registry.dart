@@ -4,22 +4,18 @@ import 'dart:developer' as developer;
 import '../models/agent_manifest.dart';
 import '../models/assistant_action.dart';
 import '../models/discovered_app.dart';
-import '../models/discovered_app_status.dart';
 import 'app_discovery_service.dart';
 
 class CapabilityRegistry {
   final List<AssistantAction> _actions = [];
-  final List<DiscoveredAppStatus> _appStatuses = [];
   final AppDiscoveryService _appDiscoveryService = AppDiscoveryService();
 
-  List<DiscoveredAppStatus> get appStatuses => List.unmodifiable(_appStatuses);
   List<AssistantAction> get actions => List.unmodifiable(_actions);
   bool get hasAvailableActions => _actions.isNotEmpty;
   int get availableActionCount => _actions.length;
 
   Future<void> initialize() async {
     _actions.clear();
-    _appStatuses.clear();
 
     final discoveredApps = await _safeDiscoverApps();
 
@@ -28,16 +24,6 @@ class CapabilityRegistry {
         developer.log(
           'Skipping OACP provider ${discoveredApp.authority}: ${discoveredApp.error ?? 'missing metadata'}',
           name: 'CapabilityRegistry',
-        );
-        _appStatuses.add(
-          DiscoveredAppStatus(
-            packageName: discoveredApp.packageName,
-            authority: discoveredApp.authority,
-            appLabel: discoveredApp.appLabel,
-            versionName: discoveredApp.versionName,
-            capabilities: const [],
-            error: discoveredApp.error ?? 'Metadata missing from provider.',
-          ),
         );
         continue;
       }
@@ -55,32 +41,11 @@ class CapabilityRegistry {
         }
 
         _actions.addAll(_buildOacpActions(manifest));
-        _appStatuses.add(
-          DiscoveredAppStatus(
-            packageName: discoveredApp.packageName,
-            authority: discoveredApp.authority,
-            appLabel: discoveredApp.appLabel,
-            versionName: discoveredApp.versionName,
-            displayName: manifest.displayName,
-            oacpVersion: manifest.oacpVersion,
-            capabilities: manifest.capabilities.map((c) => c.id).toList(),
-          ),
-        );
       } catch (e) {
         developer.log(
           'Failed to load discovered manifest from ${discoveredApp.authority}',
           name: 'CapabilityRegistry',
           error: e,
-        );
-        _appStatuses.add(
-          DiscoveredAppStatus(
-            packageName: discoveredApp.packageName,
-            authority: discoveredApp.authority,
-            appLabel: discoveredApp.appLabel,
-            versionName: discoveredApp.versionName,
-            capabilities: const [],
-            error: 'Manifest validation failed: $e',
-          ),
         );
       }
     }

@@ -8,14 +8,41 @@ import '../models/assistant_action.dart';
 import '../models/command_resolution.dart';
 import '../models/resolved_action.dart';
 import 'command_resolver.dart';
-import 'gemma_embedding_service.dart';
-import 'slot_filling_service.dart';
+
+/// Async callable that embeds a query string and returns a vector.
+typedef EmbedFn = Future<List<double>?> Function(String text);
+
+/// Async callable that extracts parameters for a resolved action from a
+/// transcript, or returns null if required slots could not be filled.
+typedef SlotFillFn = Future<Map<String, dynamic>?> Function({
+  required String transcript,
+  required AssistantAction action,
+});
 
 class NluCommandResolver implements CommandResolver {
-  NluCommandResolver(this._embeddingService, this._slotFillingService);
+  NluCommandResolver({
+    required this.embedQuery,
+    required this.embedDocument,
+    required this.slotFill,
+    required this.modelId,
+  });
 
-  final GemmaEmbeddingService _embeddingService;
-  final SlotFillingService _slotFillingService;
+  /// Embeds a user transcript/query. Must return a unit-length vector or
+  /// null if the model isn't available.
+  final EmbedFn embedQuery;
+
+  /// Embeds a stored action description (the "document" side of the retrieval
+  /// pair). Must return a unit-length vector or null if the model isn't
+  /// available.
+  final EmbedFn embedDocument;
+
+  /// Slot-filler that extracts parameters for an action from a transcript.
+  /// Returns null if required parameters could not be extracted.
+  final SlotFillFn slotFill;
+
+  /// Model id string propagated on result/error records for logging.
+  final String modelId;
+
   final Map<String, _CachedActionEmbedding> _embeddingCache = {};
 
   @override
@@ -27,15 +54,14 @@ class NluCommandResolver implements CommandResolver {
     List<AssistantAction> actions,
   ) async {
     if (actions.isEmpty) {
-      return const CommandResolutionResult.failure(
+      return CommandResolutionResult.failure(
         CommandResolutionErrorType.unavailable,
         message: 'No OACP actions are registered yet.',
-        modelId: 'oacp-nlu-embedding',
+        modelId: modelId,
       );
     }
 
     final rankedOptions = await _rankActions(transcript, actions);
-    final modelId = GemmaEmbeddingService.modelId;
     _debugLog('resolve_ranked', {
       'transcript': transcript,
       'modelId': modelId,
@@ -100,7 +126,7 @@ class NluCommandResolver implements CommandResolver {
     final action = best.action;
     final Map<String, dynamic>? parameters;
     try {
-      parameters = await _slotFillingService.extractParameters(
+      parameters = await slotFill(
         transcript: transcript,
         action: action,
       );
@@ -171,8 +197,7 @@ class NluCommandResolver implements CommandResolver {
   ) async {
     final normalizedTranscript = transcript.toLowerCase();
 
-    final transcriptEmbedding =
-        await _embeddingService.embedQuery(normalizedTranscript);
+    final transcriptEmbedding = await embedQuery(normalizedTranscript);
     if (transcriptEmbedding == null) {
       return [];
     }
@@ -218,7 +243,7 @@ class NluCommandResolver implements CommandResolver {
         continue;
       }
 
-      final embedding = await _embeddingService.embedDocument(text);
+      final embedding = await embedDocument(text);
       if (embedding == null) {
         continue;
       }
