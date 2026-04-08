@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
-import 'screens/assistant_screen.dart';
+import 'screens/splash_gate.dart';
 import 'theme/hark_theme.dart';
 
 Future<void> main() async {
@@ -26,7 +26,7 @@ class HarkApp extends StatelessWidget {
         data: theme,
         child: FToaster(child: child!),
       ),
-      home: const AssistantScreen(),
+      home: const SplashGate(),
     );
   }
 }
