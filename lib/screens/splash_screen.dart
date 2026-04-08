@@ -35,6 +35,8 @@ class SplashScreen extends ConsumerWidget {
                       width: 128,
                       height: 128,
                       fit: BoxFit.cover,
+                      cacheWidth: 256,
+                      cacheHeight: 256,
                     ),
                   ),
                 ),

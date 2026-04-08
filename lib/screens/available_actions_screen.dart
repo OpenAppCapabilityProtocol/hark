@@ -136,32 +136,52 @@ class _ActionsBody extends StatelessWidget {
 
     final groups = _groupByApp(actions, query);
 
-    return ListView(
+    // Header (summary + search) + per-app FCards in a single lazy list.
+    // ListView.builder keeps offscreen cards out of the widget tree so
+    // scroll stays 60fps when there are 14+ apps. The header is treated
+    // as index 0 so the whole list scrolls together.
+    const headerItemCount = 1;
+    final groupCount = groups.isEmpty ? 1 : groups.length;
+
+    return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      children: [
-        _SummaryRow(
-          actionCount: actions.length,
-          integrationCount: _uniqueAppCount(actions),
-        ),
-        const SizedBox(height: 16),
-        FTextField(
-          control: FTextFieldControl.managed(
-            controller: searchController,
-            onChange: (value) => onQueryChanged(value.text),
-          ),
-          hint: 'Filter by app, action, or description',
-          prefixBuilder: (context, style, variants) => Padding(
-            padding: const EdgeInsetsDirectional.only(start: 10, end: 8),
-            child: Icon(
-              FIcons.search,
-              size: 18,
-              color: context.theme.colors.mutedForeground,
+      itemCount: headerItemCount + groupCount,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SummaryRow(
+                  actionCount: actions.length,
+                  integrationCount: _uniqueAppCount(actions),
+                ),
+                const SizedBox(height: 16),
+                FTextField(
+                  control: FTextFieldControl.managed(
+                    controller: searchController,
+                    onChange: (value) => onQueryChanged(value.text),
+                  ),
+                  hint: 'Filter by app, action, or description',
+                  prefixBuilder: (context, style, variants) => Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 10,
+                      end: 8,
+                    ),
+                    child: Icon(
+                      FIcons.search,
+                      size: 18,
+                      color: context.theme.colors.mutedForeground,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ),
-        const SizedBox(height: 20),
-        if (groups.isEmpty)
-          Padding(
+          );
+        }
+        if (groups.isEmpty) {
+          return Padding(
             padding: const EdgeInsets.symmetric(vertical: 32),
             child: Center(
               child: Text(
@@ -170,15 +190,14 @@ class _ActionsBody extends StatelessWidget {
                     typography.sm.copyWith(color: colors.mutedForeground),
               ),
             ),
-          )
-        else
-          ...groups.map(
-            (group) => Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: _AppGroupCard(group: group),
-            ),
-          ),
-      ],
+          );
+        }
+        final group = groups[index - headerItemCount];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: _AppGroupCard(group: group),
+        );
+      },
     );
   }
 
@@ -339,11 +358,16 @@ class _AppIcon extends ConsumerWidget {
             if (iconBytes == null || iconBytes.isEmpty) {
               return _IconFallback(color: colors.mutedForeground);
             }
+            // cacheWidth/cacheHeight force Flutter to decode the PNG at the
+            // display size (2x for dpr) instead of the native ~192px the
+            // plugin returns. Big win for scroll perf with 14+ icons.
             return Image.memory(
               iconBytes,
               fit: BoxFit.cover,
               filterQuality: FilterQuality.medium,
               gaplessPlayback: true,
+              cacheWidth: 96,
+              cacheHeight: 96,
               errorBuilder: (_, _, _) =>
                   _IconFallback(color: colors.mutedForeground),
             );

@@ -149,6 +149,8 @@ class _EmptyState extends StatelessWidget {
                   width: 84,
                   height: 84,
                   fit: BoxFit.cover,
+                  cacheWidth: 168,
+                  cacheHeight: 168,
                 ),
               ),
             ),
