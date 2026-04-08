@@ -141,7 +141,17 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(FIcons.audioLines, size: 56, color: colors.primary),
+            Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset(
+                  'assets/hark_logo.png',
+                  width: 84,
+                  height: 84,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             Text(
               'Tap the mic to talk',
@@ -200,7 +210,7 @@ class _DefaultAssistantBanner extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
       decoration: BoxDecoration(
         color: colors.muted,
         border: Border(
@@ -211,10 +221,10 @@ class _DefaultAssistantBanner extends StatelessWidget {
         children: [
           Icon(
             FIcons.info,
-            size: 16,
+            size: 14,
             color: colors.mutedForeground,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Set Hark as your default assistant to use long-press Home.',

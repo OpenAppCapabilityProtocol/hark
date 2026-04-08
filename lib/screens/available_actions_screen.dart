@@ -4,6 +4,7 @@ import 'package:forui/forui.dart';
 import 'package:go_router/go_router.dart';
 
 import '../models/assistant_action.dart';
+import '../state/app_icon_provider.dart';
 import '../state/registry_provider.dart';
 
 /// Browse every capability Hark knows how to execute.
@@ -260,17 +261,38 @@ class _AppGroupCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              group.appName,
-              style: typography.lg.copyWith(
-                color: colors.foreground,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '${group.sourceId} · $count action${count == 1 ? '' : 's'}',
-              style: typography.xs.copyWith(color: colors.mutedForeground),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _AppIcon(packageName: group.sourceId),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        group.appName,
+                        style: typography.lg.copyWith(
+                          color: colors.foreground,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${group.sourceId} · $count action${count == 1 ? '' : 's'}',
+                        style: typography.xs.copyWith(
+                          color: colors.mutedForeground,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             FAccordion(
@@ -291,6 +313,60 @@ class _AppGroupCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AppIcon extends ConsumerWidget {
+  const _AppIcon({required this.packageName});
+
+  final String packageName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final info = ref.watch(appInfoProvider(packageName));
+    final colors = context.theme.colors;
+    const double size = 44;
+    const radius = BorderRadius.all(Radius.circular(10));
+
+    return ClipRRect(
+      borderRadius: radius,
+      child: SizedBox.square(
+        dimension: size,
+        child: info.when(
+          data: (appInfo) {
+            final iconBytes = appInfo?.icon;
+            if (iconBytes == null || iconBytes.isEmpty) {
+              return _IconFallback(color: colors.mutedForeground);
+            }
+            return Image.memory(
+              iconBytes,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium,
+              gaplessPlayback: true,
+              errorBuilder: (_, _, _) =>
+                  _IconFallback(color: colors.mutedForeground),
+            );
+          },
+          loading: () => ColoredBox(color: colors.muted),
+          error: (_, _) => _IconFallback(color: colors.mutedForeground),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconFallback extends StatelessWidget {
+  const _IconFallback({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    return ColoredBox(
+      color: colors.muted,
+      child: Icon(FIcons.package, size: 20, color: color),
     );
   }
 }
