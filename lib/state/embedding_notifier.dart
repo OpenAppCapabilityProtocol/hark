@@ -87,8 +87,7 @@ class EmbeddingNotifier extends Notifier<EmbeddingState> {
       _initFuture = null;
     });
 
-    // Kick off initialization on first read, mirroring the old lazy
-    // `prewarm()` semantics but without requiring an external caller.
+    // Kick off initialization on first read.
     Future.microtask(() {
       if (_disposed) return;
       _initFuture ??= _initialize();
@@ -102,14 +101,6 @@ class EmbeddingNotifier extends Notifier<EmbeddingState> {
 
   /// True when the model has been fully loaded and is ready for inference.
   bool get isReady => state.embedder != null;
-
-  /// Legacy no-op alias kept for migration compatibility. The notifier
-  /// auto-initializes in [build], so external prewarm is no longer required,
-  /// but existing callers may still invoke this during the migration.
-  Future<void> prewarm() async {
-    if (_disposed) return;
-    await (_initFuture ??= _initialize());
-  }
 
   /// Embed a short query string. Applies the EmbeddingGemma query prompt
   /// template via [GemmaEmbedder.formatQuery] and returns an L2-normalized

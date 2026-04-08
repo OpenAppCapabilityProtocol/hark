@@ -76,8 +76,7 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
       _initFuture = null;
     });
 
-    // Kick off initialization on first read, mirroring the old lazy
-    // `prewarm()` semantics but without requiring an external caller.
+    // Kick off initialization on first read.
     Future.microtask(() {
       if (_disposed) return;
       _initFuture ??= _initialize();
@@ -91,14 +90,6 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
 
   /// True when the model has been fully loaded and is ready for inference.
   bool get isReady => state.model != null;
-
-  /// Legacy no-op alias kept for migration compatibility. The notifier
-  /// auto-initializes in [build], so external prewarm is no longer required,
-  /// but existing callers may still invoke this during the migration.
-  Future<void> prewarm() async {
-    if (_disposed) return;
-    await (_initFuture ??= _initialize());
-  }
 
   /// Extract parameters from a voice transcript given a matched action.
   ///

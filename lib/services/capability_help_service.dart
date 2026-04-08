@@ -5,13 +5,11 @@ class CapabilityHelpResponse {
     required this.displayText,
     required this.spokenText,
     required this.metadata,
-    required this.lastAction,
   });
 
   final String displayText;
   final String spokenText;
   final String metadata;
-  final String lastAction;
 }
 
 class CapabilityHelpService {
@@ -30,7 +28,6 @@ class CapabilityHelpService {
         displayText: 'No OACP apps are available yet.',
         spokenText: 'No OACP apps are available yet.',
         metadata: 'capability_help',
-        lastAction: 'No OACP apps available',
       );
     }
 
@@ -139,7 +136,6 @@ class CapabilityHelpService {
       spokenText:
           '${group.displayName} supports ${group.actions.length} action${group.actions.length == 1 ? '' : 's'}. I listed them in chat.',
       metadata: 'capability_help • ${group.sourceId}',
-      lastAction: 'Summarized ${group.displayName} capabilities',
     );
   }
 
@@ -156,7 +152,6 @@ class CapabilityHelpService {
       spokenText:
           'I support ${groups.length} OACP app${groups.length == 1 ? '' : 's'}. I listed them in chat.',
       metadata: 'capability_help • all_apps',
-      lastAction: 'Summarized OACP app catalog',
     );
   }
 
@@ -176,7 +171,6 @@ class CapabilityHelpService {
       spokenText:
           'I could not find an installed OACP app matching $requestedAppHint. I listed the supported apps in chat.',
       metadata: 'capability_help • app_not_found',
-      lastAction: 'Could not match requested OACP app',
     );
   }
 
