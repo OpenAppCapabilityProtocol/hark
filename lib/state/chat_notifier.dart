@@ -51,8 +51,15 @@ class ChatNotifier extends Notifier<ChatState> {
   // Transient state that doesn't belong in [ChatState].
   StreamSubscription<OacpResult>? _resultSubscription;
   Timer? _restartTimer;
-  bool _isInitializing = true;
   int _messageCounter = 0;
+
+  /// Running count of resolve/dispatch failures in continuous-listening
+  /// mode. Resets to 0 on any successful dispatch, fire-and-forget or
+  /// async. When it reaches [_continuousFailureLimit], continuous mode is
+  /// dropped to prevent the mic from relaunching into a repeat failure
+  /// loop (e.g. system-assistant trigger + persistent no-match state).
+  int _consecutiveFailures = 0;
+  static const int _continuousFailureLimit = 3;
 
   /// Id of the currently streaming STT user bubble, if any.
   String? _pendingUserMessageId;
@@ -71,15 +78,17 @@ class ChatNotifier extends Notifier<ChatState> {
     _capabilityHelpService = ref.read(capabilityHelpServiceProvider);
     _commandResolver = ref.read(commandResolverProvider);
 
-    // React to model lifecycle changes so the status line follows the
-    // underlying embedding / slot-filling state. This mirrors the legacy
-    // `ref.listenManual` wiring in `_AssistantScreenState.initState`.
-    ref.listen<EmbeddingState>(
-      embeddingProvider,
+    // React to discrete model lifecycle transitions so the status line
+    // follows the underlying embedding / slot-filling state. Listening on
+    // `.select((s) => s.stage)` ensures the callback only fires when the
+    // stage enum changes — not on every download progress tick (which can
+    // hit 20+ Hz during a large model fetch).
+    ref.listen<EmbeddingStage>(
+      embeddingProvider.select((s) => s.stage),
       (_, _) => _handleModelStateChanged(),
     );
-    ref.listen<SlotFillingState>(
-      slotFillingProvider,
+    ref.listen<SlotFillingStage>(
+      slotFillingProvider.select((s) => s.stage),
       (_, _) => _handleModelStateChanged(),
     );
 
@@ -113,7 +122,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
       _assistChannel.setMethodCallHandler((call) async {
         if (call.method == 'startListening' &&
-            !_isInitializing &&
+            !state.isInitializing &&
             !state.isThinking) {
           state = state.copyWith(continuousListening: true);
           await onMicPressed();
@@ -127,12 +136,23 @@ class ChatNotifier extends Notifier<ChatState> {
       }
 
       await _checkDefaultAssistant();
+
+      // Success: drop any prior init error so the UI can clear its banner.
+      state = state.copyWith(
+        isInitializing: false,
+        clearInitError: true,
+        statusText: _idleStatusText(),
+      );
     } catch (error, stackTrace) {
       debugPrint('ChatNotifier: init failed: $error');
       debugPrint('ChatNotifier: $stackTrace');
-    } finally {
-      _isInitializing = false;
-      state = state.copyWith(statusText: _idleStatusText());
+      // Surface the init failure to the UI so the user has something more
+      // useful than a silently dead mic button.
+      state = state.copyWith(
+        isInitializing: false,
+        initError: 'Could not finish starting Hark: $error',
+        statusText: 'Initialization failed',
+      );
     }
   }
 
@@ -147,15 +167,21 @@ class ChatNotifier extends Notifier<ChatState> {
       cancelListening();
       return;
     }
-    if (_isInitializing || state.isThinking) return;
+    if (state.isInitializing || state.isThinking) return;
 
     if (_registry == null || !_registry!.hasAvailableActions) {
       await _handleError('No OACP actions are available yet.');
       return;
     }
 
-    final status = await Permission.microphone.request();
-    if (status != PermissionStatus.granted) {
+    // Check permission status first — on Android a prior grant returns
+    // instantly from `.status` without any UI round-trip, whereas `.request()`
+    // always crosses the platform channel.
+    var status = await Permission.microphone.status;
+    if (!status.isGranted) {
+      status = await Permission.microphone.request();
+    }
+    if (!status.isGranted) {
       state = state.copyWith(statusText: 'Microphone permission denied');
       return;
     }
@@ -166,7 +192,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Submits a typed message from the composer.
   Future<void> onTextSubmitted(String text) async {
-    if (_isInitializing || state.isThinking) return;
+    if (state.isInitializing || state.isThinking) return;
     final transcript = text.trim();
     if (transcript.isEmpty) return;
     await _submitPrompt(transcript);
@@ -418,6 +444,10 @@ class ChatNotifier extends Notifier<ChatState> {
       });
 
       if (dispatchResult.success) {
+        // Clear the failure counter on any successful dispatch — both
+        // fire-and-forget and broadcast paths count as success from the
+        // continuous-mode safety valve's perspective.
+        _consecutiveFailures = 0;
         state = state.copyWith(
           statusText: expectsResult ? 'Waiting for response...' : 'Done',
         );
@@ -476,6 +506,23 @@ class ChatNotifier extends Notifier<ChatState> {
       );
     }
 
+    // Continuous-mode safety valve: if three consecutive resolve/dispatch
+    // attempts have failed, stop re-firing the mic. Otherwise a stuck state
+    // (e.g. system-assistant long-press → persistent no-match) loops the
+    // same error forever.
+    _consecutiveFailures += 1;
+    if (state.continuousListening &&
+        _consecutiveFailures >= _continuousFailureLimit) {
+      _consecutiveFailures = 0;
+      state = state.copyWith(
+        continuousListening: false,
+        statusText: 'Error',
+        lastError: message,
+      );
+      await _ttsService.speak(message);
+      return;
+    }
+
     state = state.copyWith(
       statusText: 'Error',
       lastError: message,
@@ -523,6 +570,12 @@ class ChatNotifier extends Notifier<ChatState> {
         isError: result.isFailure,
       ),
     );
+
+    // A successful async result also clears the failure counter — the
+    // round trip completed from the user's perspective.
+    if (!result.isFailure) {
+      _consecutiveFailures = 0;
+    }
 
     await _ttsService.speak(text);
     await _restartListeningIfContinuous();
@@ -642,7 +695,9 @@ class ChatNotifier extends Notifier<ChatState> {
   // ---------------------------------------------------------------------------
 
   void _handleModelStateChanged() {
-    if (_isInitializing || state.isThinking || _sttService.isListening) {
+    if (state.isInitializing ||
+        state.isThinking ||
+        _sttService.isListening) {
       return;
     }
     state = state.copyWith(statusText: _idleStatusText());

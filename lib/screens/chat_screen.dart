@@ -75,9 +75,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               onOpenSettings: () =>
                   ref.read(chatProvider.notifier).openAssistantSettings(),
             ),
+          if (chat.initError != null)
+            _InitErrorBanner(message: chat.initError!),
           Expanded(
             child: chat.messages.isEmpty
-                ? _EmptyState(init: init)
+                ? _EmptyState(init: init, chat: chat)
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -100,7 +102,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ComposerBar(
             inputMode: chat.inputMode,
             isListening: chat.isListening,
-            isEnabled: init.isReady && !chat.isThinking,
+            // Mic stays disabled until the notifier has finished its own
+            // init (TTS/STT/MethodChannel) AND the model layer is ready
+            // AND no resolution is in flight AND init hasn't errored.
+            isEnabled: init.isReady &&
+                !chat.isInitializing &&
+                !chat.isThinking &&
+                chat.initError == null,
             onMicPressed: () =>
                 ref.read(chatProvider.notifier).onMicPressed(),
             onSendPressed: (text) =>
@@ -120,10 +128,51 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 }
 
+class _InitErrorBanner extends StatelessWidget {
+  const _InitErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final typography = context.theme.typography;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: BoxDecoration(
+        color: colors.destructive.withValues(alpha: 0.14),
+        border: Border(
+          bottom: BorderSide(
+            color: colors.destructive.withValues(alpha: 0.4),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            FIcons.triangleAlert,
+            size: 16,
+            color: colors.destructive,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: typography.xs.copyWith(color: colors.destructive),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.init});
+  const _EmptyState({required this.init, required this.chat});
 
   final InitState init;
+  final ChatState chat;
 
   @override
   Widget build(BuildContext context) {
@@ -132,7 +181,8 @@ class _EmptyState extends StatelessWidget {
 
     final embeddingReady = init.embedding.isReady;
     final slotReady = init.slotFilling.isReady;
-    final showProgress = !embeddingReady || !slotReady;
+    final showProgress =
+        !embeddingReady || !slotReady || chat.isInitializing;
 
     return Center(
       child: Padding(
@@ -172,7 +222,7 @@ class _EmptyState extends StatelessWidget {
             if (showProgress) ...[
               const SizedBox(height: 28),
               Text(
-                _idleHint(init),
+                _idleHint(init, chat),
                 textAlign: TextAlign.center,
                 style: typography.xs.copyWith(color: colors.mutedForeground),
               ),
@@ -183,7 +233,7 @@ class _EmptyState extends StatelessWidget {
     );
   }
 
-  String _idleHint(InitState init) {
+  String _idleHint(InitState init, ChatState chat) {
     if (init.embedding.stage == EmbeddingStage.failed) {
       return init.embedding.message;
     }
@@ -195,6 +245,9 @@ class _EmptyState extends StatelessWidget {
     }
     if (init.slotFilling.isBusy) {
       return init.slotFilling.message;
+    }
+    if (chat.isInitializing) {
+      return 'Getting the mic ready…';
     }
     return 'Still warming up…';
   }

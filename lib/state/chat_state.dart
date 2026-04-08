@@ -76,6 +76,8 @@ class ChatState {
     this.messages = const [],
     this.isListening = false,
     this.isThinking = false,
+    this.isInitializing = true,
+    this.initError,
     this.inputMode = InputMode.mic,
     this.statusText = '',
     this.lastError,
@@ -86,6 +88,19 @@ class ChatState {
   final List<ChatMessage> messages;
   final bool isListening;
   final bool isThinking;
+
+  /// True while `ChatNotifier._initAsync` is still running (TTS init,
+  /// STT init, MethodChannel handler setup, capability registry future).
+  /// Distinct from [InitState.isReady] which tracks the on-device *models*.
+  /// The composer uses this to visibly disable the mic during the brief
+  /// post-splash window before the notifier is fully wired.
+  final bool isInitializing;
+
+  /// Fatal error raised during [ChatNotifier._initAsync]. When set, the
+  /// mic cannot be used and the UI should surface the message so the user
+  /// understands why (instead of a silently dead button).
+  final String? initError;
+
   final InputMode inputMode;
 
   /// Short status line, mostly used for debug/informational text.
@@ -105,6 +120,9 @@ class ChatState {
     List<ChatMessage>? messages,
     bool? isListening,
     bool? isThinking,
+    bool? isInitializing,
+    String? initError,
+    bool clearInitError = false,
     InputMode? inputMode,
     String? statusText,
     String? lastError,
@@ -116,6 +134,8 @@ class ChatState {
       messages: messages ?? this.messages,
       isListening: isListening ?? this.isListening,
       isThinking: isThinking ?? this.isThinking,
+      isInitializing: isInitializing ?? this.isInitializing,
+      initError: clearInitError ? null : (initError ?? this.initError),
       inputMode: inputMode ?? this.inputMode,
       statusText: statusText ?? this.statusText,
       lastError: clearError ? null : (lastError ?? this.lastError),
