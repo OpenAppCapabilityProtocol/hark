@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../screens/assistant_screen.dart';
 import '../screens/available_actions_screen.dart';
+import '../screens/chat_screen.dart';
 import '../screens/splash_screen.dart';
 import '../state/init_notifier.dart';
 
@@ -61,7 +61,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: HarkRoutes.chat,
         name: 'chat',
-        builder: (_, _) => const AssistantScreen(),
+        builder: (_, _) => const ChatScreen(),
       ),
       GoRoute(
         path: HarkRoutes.actions,
