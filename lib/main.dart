@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
+import 'screens/assistant_screen.dart';
 import 'theme/hark_theme.dart';
 
 Future<void> main() async {
@@ -25,27 +26,7 @@ class HarkApp extends StatelessWidget {
         data: theme,
         child: FToaster(child: child!),
       ),
-      home: const _BootstrapHome(),
-    );
-  }
-}
-
-/// Placeholder home used while slice 1 (bootstrap) is the only landed work.
-///
-/// Replaced by `SplashGate` in slice 3 and `ChatScreen` from slice 4 onward.
-class _BootstrapHome extends StatelessWidget {
-  const _BootstrapHome();
-
-  @override
-  Widget build(BuildContext context) {
-    return FScaffold(
-      header: const FHeader(title: Text('Hark')),
-      child: Center(
-        child: Text(
-          'Hark is warming up…',
-          style: context.theme.typography.lg,
-        ),
-      ),
+      home: const AssistantScreen(),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/command_resolution.dart';
@@ -12,43 +13,42 @@ import '../models/resolved_action.dart';
 import '../services/capability_help_service.dart';
 import '../services/capability_registry.dart';
 import '../services/command_resolver.dart';
-import '../services/gemma_embedding_service.dart';
 import '../services/intent_dispatcher.dart';
-import '../services/inference_logger.dart';
-import '../services/logging_command_resolver.dart';
-import '../services/nlu_command_resolver.dart';
-import '../services/slot_filling_service.dart';
 import '../services/oacp_result_service.dart';
 import '../services/stt_service.dart';
 import '../services/tts_service.dart';
+import '../state/embedding_notifier.dart';
+import '../state/registry_provider.dart';
+import '../state/resolver_provider.dart';
+import '../state/services_providers.dart';
+import '../state/slot_filling_notifier.dart';
 import 'available_actions_screen.dart';
 import 'discovered_apps_screen.dart';
 
-class AssistantScreen extends StatefulWidget {
+class AssistantScreen extends ConsumerStatefulWidget {
   const AssistantScreen({super.key});
 
   @override
-  State<AssistantScreen> createState() => _AssistantScreenState();
+  ConsumerState<AssistantScreen> createState() => _AssistantScreenState();
 }
 
-class _AssistantScreenState extends State<AssistantScreen> {
-  final SttService _sttService = SttService();
-  final TtsService _ttsService = TtsService();
-  final OacpResultService _resultService = OacpResultService();
+class _AssistantScreenState extends ConsumerState<AssistantScreen> {
+  late final SttService _sttService = ref.read(sttServiceProvider);
+  late final TtsService _ttsService = ref.read(ttsServiceProvider);
+  late final OacpResultService _resultService =
+      ref.read(oacpResultServiceProvider);
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<_ChatMessage> _messages = [];
-  final CapabilityHelpService _capabilityHelpService = CapabilityHelpService();
-  final GemmaEmbeddingService _embeddingService = GemmaEmbeddingService();
-  final SlotFillingService _slotFillingService = SlotFillingService();
-  late final CommandResolver _commandResolver = LoggingCommandResolver(
-    NluCommandResolver(_embeddingService, _slotFillingService),
-    InferenceLogger(),
-  );
+  late final CapabilityHelpService _capabilityHelpService =
+      ref.read(capabilityHelpServiceProvider);
+  late final CommandResolver _commandResolver =
+      ref.read(commandResolverProvider);
 
   // Combined model readiness — both must be ready for full pipeline.
   bool get _modelsReady =>
-      _embeddingService.isReady && _slotFillingService.isReady;
+      ref.read(embeddingProvider).isReady &&
+      ref.read(slotFillingProvider).isReady;
   late IntentDispatcher _intentDispatcher;
   late CapabilityRegistry _capabilityRegistry;
   StreamSubscription<OacpResult>? _resultSubscription;
@@ -67,8 +67,14 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   void initState() {
     super.initState();
-    _embeddingService.addListener(_handleModelStateChanged);
-    _slotFillingService.addListener(_handleModelStateChanged);
+    ref.listenManual<EmbeddingState>(
+      embeddingProvider,
+      (previous, next) => _handleModelStateChanged(),
+    );
+    ref.listenManual<SlotFillingState>(
+      slotFillingProvider,
+      (previous, next) => _handleModelStateChanged(),
+    );
     _initServices();
   }
 
@@ -76,19 +82,14 @@ class _AssistantScreenState extends State<AssistantScreen> {
   void dispose() {
     _restartTimer?.cancel();
     _resultSubscription?.cancel();
-    _embeddingService.removeListener(_handleModelStateChanged);
-    _slotFillingService.removeListener(_handleModelStateChanged);
-    _embeddingService.dispose();
-    _slotFillingService.dispose();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _initServices() async {
-    _capabilityRegistry = CapabilityRegistry();
-    await _capabilityRegistry.initialize();
-    _intentDispatcher = IntentDispatcher(_capabilityRegistry);
+    _capabilityRegistry = await ref.read(capabilityRegistryProvider.future);
+    _intentDispatcher = ref.read(intentDispatcherProvider);
 
     await _ttsService.initialize();
     _commandResolver.initialize();
@@ -118,9 +119,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
         _statusText = _idleStatusText();
       });
     }
-
-    unawaited(_embeddingService.prewarm());
-    unawaited(_slotFillingService.prewarm());
   }
 
   Future<List<DiscoveredAppStatus>> _refreshDiscoveredApps() async {
@@ -494,11 +492,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
       return 'No OACP actions available';
     }
 
-    final embeddingState = _embeddingService.state;
-    final slotState = _slotFillingService.state;
+    final embeddingState = ref.read(embeddingProvider);
+    final slotState = ref.read(slotFillingProvider);
 
     // Show embedding model status first (it's needed for all commands).
-    if (embeddingState.stage == GemmaEmbeddingStage.failed) {
+    if (embeddingState.stage == EmbeddingStage.failed) {
       return embeddingState.message;
     }
     if (embeddingState.isBusy) {
@@ -577,8 +575,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
               statusText: _statusText,
               lastAction: _lastAction,
               transcript: _transcript,
-              embeddingState: _embeddingService.state,
-              slotFillingState: _slotFillingService.state,
+              embeddingState: ref.watch(embeddingProvider),
+              slotFillingState: ref.watch(slotFillingProvider),
             ),
             Expanded(
               child: _messages.isEmpty
@@ -620,7 +618,7 @@ class _StatusBar extends StatelessWidget {
   final String statusText;
   final String lastAction;
   final String transcript;
-  final GemmaEmbeddingState embeddingState;
+  final EmbeddingState embeddingState;
   final SlotFillingState slotFillingState;
 
   @override
@@ -628,7 +626,7 @@ class _StatusBar extends StatelessWidget {
     final theme = Theme.of(context);
     final showModelStatus = embeddingState.isBusy ||
         slotFillingState.isBusy ||
-        embeddingState.stage == GemmaEmbeddingStage.failed ||
+        embeddingState.stage == EmbeddingStage.failed ||
         slotFillingState.stage == SlotFillingStage.failed;
 
     return Container(
@@ -650,7 +648,7 @@ class _StatusBar extends StatelessWidget {
               stage: embeddingState.stage.name,
               progress: embeddingState.progress,
               isBusy: embeddingState.isBusy,
-              isFailed: embeddingState.stage == GemmaEmbeddingStage.failed,
+              isFailed: embeddingState.stage == EmbeddingStage.failed,
               isReady: embeddingState.isReady,
             ),
             const SizedBox(height: 4),
