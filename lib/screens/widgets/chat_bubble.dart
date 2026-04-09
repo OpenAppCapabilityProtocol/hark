@@ -84,9 +84,9 @@ class ChatBubble extends StatelessWidget {
     Widget body;
     if (!isUser && isPending) {
       // Assistant is thinking — render animated dots.
-      body = Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: ThinkingBubble(color: foregroundColor),
+      body = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: ThinkingBubble(),
       );
     } else {
       // Normal text rendering. For an empty pending user bubble we show a
