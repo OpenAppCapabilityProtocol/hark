@@ -23,6 +23,8 @@ class ChatMessage {
     this.isPending = false,
     this.isError = false,
     this.metadata,
+    this.sourcePackageName,
+    this.sourceAppName,
   });
 
   /// Client-generated stable id. Used for list keying and for in-place
@@ -36,12 +38,25 @@ class ChatMessage {
   /// Small dim text shown below the bubble (e.g. `com.example.app • increment_counter`).
   final String? metadata;
 
+  /// Android package name of the app this message came from (e.g.
+  /// `com.example.app`). Set when the assistant resolves a command to a
+  /// specific OACP action. Null for pending/thinking messages, errors,
+  /// and user messages.
+  final String? sourcePackageName;
+
+  /// Display name of the source app (e.g. "ArchiveTune"). Set alongside
+  /// [sourcePackageName]. Used by the chat bubble to show the app name
+  /// without an async lookup.
+  final String? sourceAppName;
+
   ChatMessage copyWith({
     String? text,
     bool? isPending,
     bool? isError,
     String? metadata,
     bool clearMetadata = false,
+    String? sourcePackageName,
+    String? sourceAppName,
   }) {
     return ChatMessage(
       id: id,
@@ -50,6 +65,8 @@ class ChatMessage {
       isPending: isPending ?? this.isPending,
       isError: isError ?? this.isError,
       metadata: clearMetadata ? null : (metadata ?? this.metadata),
+      sourcePackageName: sourcePackageName ?? this.sourcePackageName,
+      sourceAppName: sourceAppName ?? this.sourceAppName,
     );
   }
 
@@ -62,11 +79,14 @@ class ChatMessage {
           other.text == text &&
           other.isPending == isPending &&
           other.isError == isError &&
-          other.metadata == metadata;
+          other.metadata == metadata &&
+          other.sourcePackageName == sourcePackageName &&
+          other.sourceAppName == sourceAppName;
 
   @override
-  int get hashCode =>
-      Object.hash(id, role, text, isPending, isError, metadata);
+  int get hashCode => Object.hash(
+      id, role, text, isPending, isError, metadata,
+      sourcePackageName, sourceAppName);
 }
 
 /// Top-level state for the chat screen.

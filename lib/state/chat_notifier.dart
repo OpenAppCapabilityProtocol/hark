@@ -415,6 +415,8 @@ class ChatNotifier extends Notifier<ChatState> {
       _finalizePendingAssistant(
         text: resolvedAction.confirmationMessage,
         metadata: _actionMetadata(resolvedAction),
+        sourcePackageName: resolvedAction.sourceId,
+        sourceAppName: actionDefinition?.displayName,
       );
 
       state = state.copyWith(statusText: 'Speaking...');
@@ -613,6 +615,8 @@ class ChatNotifier extends Notifier<ChatState> {
     required String text,
     String? metadata,
     bool isError = false,
+    String? sourcePackageName,
+    String? sourceAppName,
   }) {
     final pendingId = _pendingAssistantMessageId;
     if (pendingId == null) {
@@ -623,6 +627,8 @@ class ChatNotifier extends Notifier<ChatState> {
           text: text,
           metadata: metadata,
           isError: isError,
+          sourcePackageName: sourcePackageName,
+          sourceAppName: sourceAppName,
         ),
       );
       return;
@@ -634,11 +640,11 @@ class ChatNotifier extends Notifier<ChatState> {
         metadata: metadata,
         isPending: false,
         isError: isError,
+        sourcePackageName: sourcePackageName,
+        sourceAppName: sourceAppName,
       ),
     );
     _pendingAssistantMessageId = null;
-    // Re-log as if it were a fresh append so the debug stream matches the
-    // legacy per-bubble log shape.
     _logChatMessage(
       ChatMessage(
         id: pendingId,
@@ -646,6 +652,8 @@ class ChatNotifier extends Notifier<ChatState> {
         text: text,
         metadata: metadata,
         isError: isError,
+        sourcePackageName: sourcePackageName,
+        sourceAppName: sourceAppName,
       ),
     );
   }

@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
+import '../../state/app_icon_provider.dart';
 import '../../state/chat_state.dart';
 import 'thinking_bubble.dart';
 
@@ -9,14 +11,14 @@ import 'thinking_bubble.dart';
 /// Layout and styling vary based on role and pending/error state:
 /// - **User** messages hug the right edge in the primary accent color.
 /// - **Assistant** messages hug the left edge in the secondary surface color.
-/// - **Pending assistant** messages render a [ThinkingBubble] in place of text.
+///   When the message originated from a resolved OACP action, a small app
+///   icon + app name header is shown above the text (Google Assistant style).
+/// - **Pending assistant** messages render a [ThinkingBubble] (an animated
+///   [FCircularProgress] loader) in place of text.
 /// - **Pending user** messages get a subtle border to hint they are still
 ///   being updated (live transcript).
 /// - **Error assistant** messages tint the bubble with the destructive color.
-///
-/// This widget is purely presentational — it takes a [ChatMessage] and paints
-/// it. No state, no business logic, no providers.
-class ChatBubble extends StatelessWidget {
+class ChatBubble extends ConsumerWidget {
   const ChatBubble({required this.message, super.key});
 
   final ChatMessage message;
@@ -26,13 +28,15 @@ class ChatBubble extends StatelessWidget {
   static const double _cornerSmall = 4.0;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
 
     final bool isUser = message.role == ChatRole.user;
     final bool isError = message.isError;
     final bool isPending = message.isPending;
+    final bool hasAppAttribution =
+        !isUser && message.sourcePackageName != null;
 
     // --- Colors -------------------------------------------------------------
     final Color backgroundColor;
@@ -49,8 +53,6 @@ class ChatBubble extends StatelessWidget {
     }
 
     // --- Shape --------------------------------------------------------------
-    // Flat corner points toward the sender: bottom-right for user, bottom-left
-    // for assistant. The other three corners are rounded.
     final BorderRadius borderRadius = isUser
         ? const BorderRadius.only(
             topLeft: Radius.circular(_cornerLarge),
@@ -65,7 +67,6 @@ class ChatBubble extends StatelessWidget {
             bottomRight: Radius.circular(_cornerLarge),
           );
 
-    // Subtle border for pending *user* messages (live transcript hint).
     final Border? border = (isUser && isPending)
         ? Border.all(
             color: colors.primary.withValues(alpha: 0.4),
@@ -73,24 +74,76 @@ class ChatBubble extends StatelessWidget {
           )
         : null;
 
-    // --- Role label ---------------------------------------------------------
-    final String roleLabel = isUser ? 'You' : 'Hark';
-    final TextStyle roleLabelStyle = typography.xs.copyWith(
-      color: foregroundColor.withValues(alpha: 0.7),
-      fontWeight: FontWeight.w600,
-    );
+    // --- App attribution header (assistant messages from OACP actions) -------
+    Widget? appHeader;
+    if (hasAppAttribution) {
+      final appInfo = ref.watch(appInfoProvider(message.sourcePackageName!));
+      final iconBytes = appInfo.asData?.value?.icon;
+      final appName = message.sourceAppName ?? message.sourcePackageName!;
+
+      appHeader = Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox.square(
+                dimension: 20,
+                child: (iconBytes != null && iconBytes.isNotEmpty)
+                    ? Image.memory(
+                        iconBytes,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.medium,
+                        gaplessPlayback: true,
+                        cacheWidth: 48,
+                        cacheHeight: 48,
+                        errorBuilder: (_, _, _) => Icon(
+                          FIcons.package,
+                          size: 12,
+                          color: foregroundColor.withValues(alpha: 0.6),
+                        ),
+                      )
+                    : Icon(
+                        FIcons.package,
+                        size: 12,
+                        color: foregroundColor.withValues(alpha: 0.6),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              appName,
+              style: typography.xs.copyWith(
+                color: foregroundColor.withValues(alpha: 0.75),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // --- Role label (for messages without app attribution) -------------------
+    Widget? roleLabel;
+    if (!hasAppAttribution) {
+      roleLabel = Text(
+        isUser ? 'You' : 'Hark',
+        style: typography.xs.copyWith(
+          color: foregroundColor.withValues(alpha: 0.7),
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
 
     // --- Body ---------------------------------------------------------------
     Widget body;
     if (!isUser && isPending) {
-      // Assistant is thinking — render animated dots.
       body = const Padding(
         padding: EdgeInsets.symmetric(vertical: 4),
         child: ThinkingBubble(),
       );
     } else {
-      // Normal text rendering. For an empty pending user bubble we show a
-      // dim ellipsis placeholder so the bubble is visible.
       final bool showPlaceholder = isUser && isPending && message.text.isEmpty;
       final String bodyText = showPlaceholder ? '…' : message.text;
       final TextStyle bodyStyle = typography.sm.copyWith(
@@ -135,8 +188,11 @@ class ChatBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(roleLabel, style: roleLabelStyle),
-                const SizedBox(height: 4),
+                ?appHeader,
+                if (roleLabel != null) ...[
+                  roleLabel,
+                  const SizedBox(height: 4),
+                ],
                 body,
                 ?metadataBlock,
               ],
