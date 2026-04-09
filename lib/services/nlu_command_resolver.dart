@@ -61,6 +61,33 @@ class NluCommandResolver implements CommandResolver {
       );
     }
 
+    // Fast path: unambiguous keyword / alias match for zero-parameter
+    // commands. Avoids the embedding + slot-filling pipeline entirely
+    // for trivial utterances like "turn on the flashlight", "pause
+    // music", "scan qr code". Also works during cold start before
+    // models have finished loading.
+    final fastPath = _tryKeywordFastPath(transcript, actions);
+    if (fastPath != null) {
+      _debugLog('resolve_fast_path', {
+        'transcript': transcript,
+        'modelId': modelId,
+        'actionKey': '${fastPath.sourceId}.${fastPath.actionId}',
+        'matchedVia': fastPath.parameters['__matched_via'],
+      });
+      // Strip the internal bookkeeping key before returning.
+      final resolved = ResolvedAction(
+        sourceType: fastPath.sourceType,
+        sourceId: fastPath.sourceId,
+        actionId: fastPath.actionId,
+        parameters: {
+          for (final entry in fastPath.parameters.entries)
+            if (entry.key != '__matched_via') entry.key: entry.value,
+        },
+        confirmationMessage: fastPath.confirmationMessage,
+      );
+      return CommandResolutionResult.success(resolved, modelId: modelId);
+    }
+
     final rankedOptions = await _rankActions(transcript, actions);
     _debugLog('resolve_ranked', {
       'transcript': transcript,
@@ -189,6 +216,107 @@ class NluCommandResolver implements CommandResolver {
     // The floor check already rejects scores below 0.30.
     // Here we require a modest minimum to filter weak-but-not-garbage matches.
     return semanticScore != null && semanticScore >= 0.35;
+  }
+
+  /// Pre-embedding keyword / alias fast path for trivial zero-parameter
+  /// commands. Returns a [ResolvedAction] if the transcript unambiguously
+  /// matches exactly one action via an exact alias or a high-signal
+  /// keyword hit, AND that action has no required parameters. Otherwise
+  /// returns null and the full NLU pipeline runs.
+  ///
+  /// The returned `ResolvedAction.parameters` carries an internal
+  /// `__matched_via` key that the caller strips before returning; it is
+  /// used only for telemetry logging.
+  ///
+  /// Why this exists:
+  /// 1. Latency — "turn on the flashlight" dispatches in microseconds.
+  /// 2. Cold-start UX — commands fire before the embedding model has
+  ///    finished loading during a fresh process launch.
+  /// 3. Robustness — if the models fail to load, simple commands still
+  ///    work.
+  ResolvedAction? _tryKeywordFastPath(
+    String transcript,
+    List<AssistantAction> actions,
+  ) {
+    final normalized = transcript.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+
+    // Only fire for actions with no required params — filling typed
+    // slots needs the LLM even if the action itself is unambiguous.
+    bool hasNoRequiredParams(AssistantAction a) =>
+        !a.parameters.any((p) => p.required);
+
+    // Pass 1: exact alias match. An action's `aliases` list is a
+    // curated set of "the user literally said this" phrases. Exact
+    // equality is the strongest possible signal.
+    final exactAliasHits = <AssistantAction>[];
+    for (final action in actions) {
+      if (!hasNoRequiredParams(action)) continue;
+      for (final alias in action.aliases) {
+        if (alias.toLowerCase().trim() == normalized) {
+          exactAliasHits.add(action);
+          break;
+        }
+      }
+    }
+    if (exactAliasHits.length == 1) {
+      return _buildFastPathResolution(exactAliasHits.single, 'exact_alias');
+    }
+    if (exactAliasHits.length > 1) {
+      // Multiple actions claim the same alias — ambiguous, fall through
+      // to the embedding model to decide.
+      return null;
+    }
+
+    // Pass 2: keyword substring match. Keywords are single words or
+    // short phrases that strongly imply the action (e.g. "flashlight",
+    // "scan qr"). We require the keyword to appear as a whole token in
+    // the transcript, not as a substring inside another word.
+    final keywordHits = <AssistantAction>[];
+    for (final action in actions) {
+      if (!hasNoRequiredParams(action)) continue;
+      for (final keyword in action.keywords) {
+        final kw = keyword.toLowerCase().trim();
+        if (kw.isEmpty) continue;
+        if (_containsAsWord(normalized, kw)) {
+          keywordHits.add(action);
+          break;
+        }
+      }
+    }
+    if (keywordHits.length == 1) {
+      return _buildFastPathResolution(keywordHits.single, 'keyword');
+    }
+
+    // Ambiguous or no hit — fall through to embedding.
+    return null;
+  }
+
+  /// True if [needle] appears in [haystack] as a complete whitespace- or
+  /// punctuation-delimited token (or sequence of tokens for multi-word
+  /// needles). Avoids matching "pause" inside "pauseplay" or "can" in
+  /// "cancel".
+  bool _containsAsWord(String haystack, String needle) {
+    final escaped = RegExp.escape(needle);
+    // \b would work for ASCII but fails on unicode word boundaries.
+    // Use a simple before/after character class instead.
+    final pattern = RegExp(r'(^|[^a-z0-9])' + escaped + r'([^a-z0-9]|$)');
+    return pattern.hasMatch(haystack);
+  }
+
+  /// Wraps a matched action in a [ResolvedAction] with empty params and
+  /// a telemetry marker.
+  ResolvedAction _buildFastPathResolution(
+    AssistantAction action,
+    String matchedVia,
+  ) {
+    return ResolvedAction(
+      sourceType: action.sourceType.name,
+      sourceId: action.sourceId,
+      actionId: action.actionId,
+      parameters: {'__matched_via': matchedVia},
+      confirmationMessage: action.confirmationMessage,
+    );
   }
 
   Future<List<_RankedAction>> _rankActions(
