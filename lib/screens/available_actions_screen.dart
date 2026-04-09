@@ -583,7 +583,10 @@ Future<void> _showDetailsSheet(BuildContext context, AssistantAction action) {
   return showFSheet<void>(
     context: context,
     side: FLayout.btt,
-    mainAxisMaxRatio: 0.75,
+    // Let the sheet shrink to its content instead of filling a fixed
+    // fraction of the screen. 0.85 is the hard ceiling for very long
+    // descriptions + many examples.
+    mainAxisMaxRatio: 0.85,
     builder: (sheetContext) => _ActionDetailsSheet(action: action),
   );
 }
@@ -604,109 +607,165 @@ class _ActionDetailsSheet extends StatelessWidget {
         action.parameters.where((p) => !p.required).toList(growable: false);
 
     // Required by forui: the sheet builder must return a widget with an
-    // explicit background colour. Without this the content renders
-    // transparent over the page behind (the bottom-sheet transport does
-    // not provide a default background).
+    // explicit background colour. We intentionally do NOT set
+    // height: infinity — letting the column shrink-wrap keeps the sheet
+    // tight to its content instead of filling mainAxisMaxRatio.
     return Container(
       width: double.infinity,
-      height: double.infinity,
       decoration: BoxDecoration(
         color: colors.background,
-        border: Border(
-          top: BorderSide(color: colors.border),
-        ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(top: BorderSide(color: colors.border)),
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                children: [
-                  _AppIconTile(
-                    packageName: action.sourceId,
-                    accent: accent,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 2),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colors.mutedForeground.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header: icon + action title + app name
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          action.displayName,
-                          style: typography.md.copyWith(
-                            color: colors.foreground,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        _AppIconTile(
+                          packageName: action.sourceId,
+                          accent: accent,
                         ),
-                        Text(
-                          _humanizeActionId(action.actionId),
-                          style: typography.sm.copyWith(
-                            color: colors.mutedForeground,
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _humanizeActionId(action.actionId),
+                                style: typography.lg.copyWith(
+                                  color: colors.foreground,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.15,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'in ${action.displayName}',
+                                style: typography.sm.copyWith(
+                                  color: colors.mutedForeground,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-              if (action.description.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                Text(
-                  action.description,
-                  style: typography.sm.copyWith(color: colors.foreground),
-                ),
-              ],
-              if (action.examples.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Text(
-                  'Try saying',
-                  style: typography.xs.copyWith(
-                    color: colors.mutedForeground,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final example in action.examples)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '\u201c$example\u201d',
-                      style: typography.sm.copyWith(
-                        color: colors.foreground.withValues(alpha: 0.85),
+                    if (action.description.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        action.description,
+                        style: typography.sm.copyWith(
+                          color: colors.foreground.withValues(alpha: 0.88),
+                          height: 1.4,
+                        ),
                       ),
-                    ),
-                  ),
-              ],
-              if (action.parameters.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Text(
-                  'Parameters',
-                  style: typography.xs.copyWith(
-                    color: colors.mutedForeground,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final p in requiredParams) _ParamChip(parameter: p),
-                    for (final p in optionalParams) _ParamChip(parameter: p),
+                    ],
+                    if (action.examples.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      _SectionHeading(label: 'Try saying', accent: accent),
+                      const SizedBox(height: 10),
+                      for (final example in action.examples)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Container(
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                            decoration: BoxDecoration(
+                              color: colors.muted.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border(
+                                left: BorderSide(color: accent, width: 2.5),
+                              ),
+                            ),
+                            child: Text(
+                              '\u201c$example\u201d',
+                              style: typography.sm.copyWith(
+                                color: colors.foreground,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                    if (action.parameters.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      _SectionHeading(label: 'Parameters', accent: accent),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final p in requiredParams)
+                            _ParamChip(parameter: p),
+                          for (final p in optionalParams)
+                            _ParamChip(parameter: p),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
-                ],
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({required this.label, required this.accent});
+
+  final String label;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final typography = context.theme.typography;
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 12,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: typography.xs.copyWith(
+            color: colors.foreground,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ],
     );
   }
 }
