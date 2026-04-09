@@ -61,7 +61,8 @@ class _AvailableActionsScreenState
                     width: 18,
                     height: 18,
                     child: FCircularProgress(
-                        size: FCircularProgressSizeVariant.sm),
+                      size: FCircularProgressSizeVariant.sm,
+                    ),
                   )
                 : const Icon(FIcons.refreshCw),
           ),
@@ -139,9 +140,14 @@ class _ActionsBody extends StatelessWidget {
                   hint: 'Search apps and actions',
                   prefixBuilder: (context, style, variants) => Padding(
                     padding: const EdgeInsetsDirectional.only(
-                        start: 10, end: 8),
-                    child: Icon(FIcons.search,
-                        size: 18, color: colors.mutedForeground),
+                      start: 10,
+                      end: 8,
+                    ),
+                    child: Icon(
+                      FIcons.search,
+                      size: 18,
+                      color: colors.mutedForeground,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -165,8 +171,7 @@ class _ActionsBody extends StatelessWidget {
             child: Center(
               child: Text(
                 'No matches for "${searchController.text}".',
-                style:
-                    typography.sm.copyWith(color: colors.mutedForeground),
+                style: typography.sm.copyWith(color: colors.mutedForeground),
               ),
             ),
           );
@@ -198,16 +203,18 @@ class _ActionsBody extends StatelessWidget {
       grouped.putIfAbsent(action.sourceId, () => []).add(action);
     }
 
-    final groups = grouped.entries.map((entry) {
-      final sorted = [...entry.value]
-        ..sort((a, b) => a.actionId.compareTo(b.actionId));
-      return _AppGroup(
-        sourceId: entry.key,
-        appName: sorted.first.displayName,
-        domain: sorted.first.domain,
-        actions: sorted,
-      );
-    }).toList(growable: false);
+    final groups = grouped.entries
+        .map((entry) {
+          final sorted = [...entry.value]
+            ..sort((a, b) => a.actionId.compareTo(b.actionId));
+          return _AppGroup(
+            sourceId: entry.key,
+            appName: sorted.first.displayName,
+            domain: sorted.first.domain,
+            actions: sorted,
+          );
+        })
+        .toList(growable: false);
 
     groups.sort((a, b) => a.appName.compareTo(b.appName));
     return groups;
@@ -307,7 +314,9 @@ class _AppSectionState extends State<_AppSection>
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: accent.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(999),
@@ -417,10 +426,7 @@ class _ActionRow extends StatelessWidget {
               width: 6,
               height: 6,
               margin: const EdgeInsets.only(top: 6, right: 12),
-              decoration: BoxDecoration(
-                color: accent,
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
             ),
             Expanded(
               child: Column(
@@ -528,34 +534,34 @@ class _IconFallback extends StatelessWidget {
 /// earlier swipe-deck variant used for its gradients, but applied as a
 /// single solid accent colour per app instead of a full-screen gradient.
 const Map<String, Color> _domainAccents = {
-  'music':         Color(0xFFA855F7),
-  'audio':         Color(0xFFA855F7),
-  'media':         Color(0xFFF59E0B),
-  'knowledge':     Color(0xFF0EA5E9),
-  'reference':     Color(0xFF14B8A6),
-  'encyclopedia':  Color(0xFF0EA5E9),
-  'search':        Color(0xFF0EA5E9),
-  'navigation':    Color(0xFF22C55E),
-  'maps':          Color(0xFF22C55E),
-  'camera':        Color(0xFFF97316),
-  'photo':         Color(0xFFF97316),
+  'music': Color(0xFFA855F7),
+  'audio': Color(0xFFA855F7),
+  'media': Color(0xFFF59E0B),
+  'knowledge': Color(0xFF0EA5E9),
+  'reference': Color(0xFF14B8A6),
+  'encyclopedia': Color(0xFF0EA5E9),
+  'search': Color(0xFF0EA5E9),
+  'navigation': Color(0xFF22C55E),
+  'maps': Color(0xFF22C55E),
+  'camera': Color(0xFFF97316),
+  'photo': Color(0xFFF97316),
   'communication': Color(0xFF3B82F6),
-  'messaging':     Color(0xFF3B82F6),
-  'productivity':  Color(0xFF8B5CF6),
-  'tasks':         Color(0xFF8B5CF6),
-  'calendar':      Color(0xFF8B5CF6),
-  'utility':       Color(0xFF94A3B8),
-  'tools':         Color(0xFF94A3B8),
-  'file':          Color(0xFF94A3B8),
-  'files':         Color(0xFF94A3B8),
-  'health':        Color(0xFFEF4444),
-  'fitness':       Color(0xFFEF4444),
-  'weather':       Color(0xFF38BDF8),
-  'reading':       Color(0xFFF59E0B),
-  'scanner':       Color(0xFFF97316),
-  'barcode':       Color(0xFFF97316),
-  'recording':     Color(0xFFEC4899),
-  'voice':         Color(0xFFEC4899),
+  'messaging': Color(0xFF3B82F6),
+  'productivity': Color(0xFF8B5CF6),
+  'tasks': Color(0xFF8B5CF6),
+  'calendar': Color(0xFF8B5CF6),
+  'utility': Color(0xFF94A3B8),
+  'tools': Color(0xFF94A3B8),
+  'file': Color(0xFF94A3B8),
+  'files': Color(0xFF94A3B8),
+  'health': Color(0xFFEF4444),
+  'fitness': Color(0xFFEF4444),
+  'weather': Color(0xFF38BDF8),
+  'reading': Color(0xFFF59E0B),
+  'scanner': Color(0xFFF97316),
+  'barcode': Color(0xFFF97316),
+  'recording': Color(0xFFEC4899),
+  'voice': Color(0xFFEC4899),
 };
 
 const List<Color> _fallbackAccents = [
@@ -601,10 +607,12 @@ class _ActionDetailsSheet extends StatelessWidget {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
     final accent = _accentFor(action.domain, action.sourceId);
-    final requiredParams =
-        action.parameters.where((p) => p.required).toList(growable: false);
-    final optionalParams =
-        action.parameters.where((p) => !p.required).toList(growable: false);
+    final requiredParams = action.parameters
+        .where((p) => p.required)
+        .toList(growable: false);
+    final optionalParams = action.parameters
+        .where((p) => !p.required)
+        .toList(growable: false);
 
     // Required by forui: the sheet builder must return a widget with an
     // explicit background colour. We intentionally do NOT set
@@ -691,8 +699,7 @@ class _ActionDetailsSheet extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Container(
-                            padding:
-                                const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
                             decoration: BoxDecoration(
                               color: colors.muted.withValues(alpha: 0.45),
                               borderRadius: BorderRadius.circular(10),
@@ -904,8 +911,6 @@ String _humanizeActionId(String actionId) {
   return actionId
       .split(RegExp(r'[_\-]'))
       .where((word) => word.isNotEmpty)
-      .map(
-        (word) => word[0].toUpperCase() + word.substring(1).toLowerCase(),
-      )
+      .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
       .join(' ');
 }

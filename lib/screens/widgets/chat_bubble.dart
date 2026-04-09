@@ -35,8 +35,7 @@ class ChatBubble extends ConsumerWidget {
     final bool isUser = message.role == ChatRole.user;
     final bool isError = message.isError;
     final bool isPending = message.isPending;
-    final bool hasAppAttribution =
-        !isUser && message.sourcePackageName != null;
+    final bool hasAppAttribution = !isUser && message.sourcePackageName != null;
 
     // --- Colors -------------------------------------------------------------
     final Color backgroundColor;
@@ -68,10 +67,7 @@ class ChatBubble extends ConsumerWidget {
           );
 
     final Border? border = (isUser && isPending)
-        ? Border.all(
-            color: colors.primary.withValues(alpha: 0.4),
-            width: 1.0,
-          )
+        ? Border.all(color: colors.primary.withValues(alpha: 0.4), width: 1.0)
         : null;
 
     // --- App attribution header (assistant messages from OACP actions) -------
@@ -175,10 +171,7 @@ class ChatBubble extends ConsumerWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: _maxWidth),
           child: Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 10,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: borderRadius,

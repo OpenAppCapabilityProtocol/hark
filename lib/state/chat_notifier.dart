@@ -101,9 +101,7 @@ class ChatNotifier extends Notifier<ChatState> {
     // Kick off async init after build() returns so `state` is observable.
     Future.microtask(_initAsync);
 
-    return const ChatState(
-      statusText: 'Tap to speak or type a command',
-    );
+    return const ChatState(statusText: 'Tap to speak or type a command');
   }
 
   // ---------------------------------------------------------------------------
@@ -214,13 +212,10 @@ class ChatNotifier extends Notifier<ChatState> {
     // pending bubble so it doesn't linger.
     final pendingId = _pendingUserMessageId;
     if (pendingId != null) {
-      final existing =
-          state.messages.firstWhere((m) => m.id == pendingId,
-              orElse: () => const ChatMessage(
-                    id: '',
-                    role: ChatRole.user,
-                    text: '',
-                  ));
+      final existing = state.messages.firstWhere(
+        (m) => m.id == pendingId,
+        orElse: () => const ChatMessage(id: '', role: ChatRole.user, text: ''),
+      );
       if (existing.id.isNotEmpty && existing.text.trim().isEmpty) {
         _removeMessage(pendingId);
       } else if (existing.id.isNotEmpty) {
@@ -278,10 +273,7 @@ class ChatNotifier extends Notifier<ChatState> {
       onResult: (text) {
         final currentPendingId = _pendingUserMessageId;
         if (currentPendingId == null) return;
-        _updateMessage(
-          currentPendingId,
-          (m) => m.copyWith(text: text),
-        );
+        _updateMessage(currentPendingId, (m) => m.copyWith(text: text));
       },
       onDone: () async {
         final finalizingId = _pendingUserMessageId;
@@ -292,11 +284,8 @@ class ChatNotifier extends Notifier<ChatState> {
         if (finalizingId != null) {
           final msg = state.messages.firstWhere(
             (m) => m.id == finalizingId,
-            orElse: () => const ChatMessage(
-              id: '',
-              role: ChatRole.user,
-              text: '',
-            ),
+            orElse: () =>
+                const ChatMessage(id: '', role: ChatRole.user, text: ''),
           );
           transcript = msg.text.trim();
         }
@@ -335,11 +324,7 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> _submitPrompt(String transcript) async {
     debugPrint('HarkDebug user_input: $transcript');
     _appendMessage(
-      ChatMessage(
-        id: _nextMessageId(),
-        role: ChatRole.user,
-        text: transcript,
-      ),
+      ChatMessage(id: _nextMessageId(), role: ChatRole.user, text: transcript),
     );
     await _processTranscript(transcript);
   }
@@ -468,18 +453,13 @@ class ChatNotifier extends Notifier<ChatState> {
       // shouldn't linger.
       final leftoverId = _pendingAssistantMessageId;
       if (leftoverId != null) {
-        _updateMessage(
-          leftoverId,
-          (m) => m.copyWith(isPending: false),
-        );
+        _updateMessage(leftoverId, (m) => m.copyWith(isPending: false));
         _pendingAssistantMessageId = null;
       }
-      final nextStatus =
-          state.statusText == 'Done' ? _idleStatusText() : state.statusText;
-      state = state.copyWith(
-        isThinking: false,
-        statusText: nextStatus,
-      );
+      final nextStatus = state.statusText == 'Done'
+          ? _idleStatusText()
+          : state.statusText;
+      state = state.copyWith(isThinking: false, statusText: nextStatus);
     }
   }
 
@@ -490,11 +470,7 @@ class ChatNotifier extends Notifier<ChatState> {
     if (pendingId != null) {
       _updateMessage(
         pendingId,
-        (m) => m.copyWith(
-          text: message,
-          isPending: false,
-          isError: true,
-        ),
+        (m) => m.copyWith(text: message, isPending: false, isError: true),
       );
       _pendingAssistantMessageId = null;
     } else {
@@ -525,10 +501,7 @@ class ChatNotifier extends Notifier<ChatState> {
       return;
     }
 
-    state = state.copyWith(
-      statusText: 'Error',
-      lastError: message,
-    );
+    state = state.copyWith(statusText: 'Error', lastError: message);
     await _ttsService.speak(message);
     await _restartListeningIfContinuous();
   }
@@ -599,8 +572,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
   Future<void> _checkDefaultAssistant() async {
     try {
-      final result =
-          await _assistChannel.invokeMethod<bool>('isDefaultAssistant');
+      final result = await _assistChannel.invokeMethod<bool>(
+        'isDefaultAssistant',
+      );
       state = state.copyWith(isDefaultAssistant: result ?? false);
     } catch (_) {
       // Not available on this platform.
@@ -660,9 +634,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   void _appendMessage(ChatMessage message) {
     _logChatMessage(message);
-    state = state.copyWith(
-      messages: [...state.messages, message],
-    );
+    state = state.copyWith(messages: [...state.messages, message]);
   }
 
   void _updateMessage(
@@ -693,8 +665,8 @@ class ChatNotifier extends Notifier<ChatState> {
     final parameterPart = action.parameters.isEmpty
         ? 'no parameters'
         : action.parameters.entries
-            .map((entry) => '${entry.key}=${entry.value}')
-            .join(', ');
+              .map((entry) => '${entry.key}=${entry.value}')
+              .join(', ');
     return '${action.sourceId} • ${action.actionId} • $parameterPart';
   }
 
@@ -703,9 +675,7 @@ class ChatNotifier extends Notifier<ChatState> {
   // ---------------------------------------------------------------------------
 
   void _handleModelStateChanged() {
-    if (state.isInitializing ||
-        state.isThinking ||
-        _sttService.isListening) {
+    if (state.isInitializing || state.isThinking || _sttService.isListening) {
       return;
     }
     state = state.copyWith(statusText: _idleStatusText());

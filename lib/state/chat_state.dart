@@ -85,8 +85,15 @@ class ChatMessage {
 
   @override
   int get hashCode => Object.hash(
-      id, role, text, isPending, isError, metadata,
-      sourcePackageName, sourceAppName);
+    id,
+    role,
+    text,
+    isPending,
+    isError,
+    metadata,
+    sourcePackageName,
+    sourceAppName,
+  );
 }
 
 /// Top-level state for the chat screen.
