@@ -58,15 +58,43 @@ Status: `[ ]`
 - [ ] Eliminate Android system beep on listen start
 - [ ] Enable true continuous listening without system STT limitations
 
-### 4. Assistant Overlay
+### 4. Model Loading Performance — llamadart migration
+
+Status: `[-]`
+
+Replace `flutter_embedder` (ORT, no mmap, synchronous main-isolate load) and `flutter_gemma` (MediaPipe, plugin teardown on Activity detach) with a single `llamadart` dependency. llamadart ships mmap-by-default, isolate-based inference, explicit hot-restart handling, and a first-class embedding API tested with EmbeddingGemma as its default example. Migration deletes two plugins instead of forking one and gets every architectural property we'd otherwise build ourselves for free.
+
+Gated on a quantization benchmark (Slice 0) that picks the Q4_K_M / Q5_K_M / Q8_0 sweet spot per model empirically instead of guessing.
+
+- [ ] Slice 0 — Quantization benchmark harness: `tools/quant_bench/` CLI, 20-case embedding gold set + 15-case slot-filling gold set, matrix over 3 quants × 2 models, decision table in `docs/plans/llamadart-quant-benchmark.md`
+- [ ] Slice 1 — Baseline instrumentation (before): Stopwatch-wrapped `HarkLoadPerf` logs around current load path, device numbers in `docs/plans/llamadart-migration-baseline.md`
+- [ ] Slice 5 — Keyword / alias fast-path: zero-parameter commands (flashlight, pause, scan) dispatch during splash before models load
+- [ ] Slice 2 — Migrate `EmbeddingNotifier` from `flutter_embedder` → `llamadart`
+- [ ] Slice 3 — Migrate `SlotFillingNotifier` from `flutter_gemma` → `llamadart` (skipped if Slice 0 falls back to embedder-only)
+- [ ] Slice 4 — Warm engine via `HarkApplication.onCreate()` + `keepAliveMain` Dart entrypoint
+- [ ] Slice 6 — Re-measure on-device, update baseline doc with before/after columns
+- [ ] Slice 7 — Flip this item to done, unblock Assistant Overlay (#5), open PR
+
+Full plan: [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md).
+
+**Why this is #4**: Before we ship the overlay, cold start needs to feel instant. Earlier iteration of this plan proposed forking `flutter_embedder` to add mmap + a static session cache. Deep research found `llamadart` already has all of that, plus 20+ chat templates, hot-restart safety, isolate-based backend, and prebuilt native binaries via Dart's `hook/build.dart`. Migration is smaller and safer than forking.
+
+**Deferred as Phase-4 follow-ups**:
+- Precompute capability embeddings at registry-refresh time
+- Switch embedding model family (all-MiniLM-L6-v2 / e5-small-v2) — only if Q8_0 fails the quality gate
+- Fork `llamadart` (not needed unless we hit an upstream gap)
+
+### 5. Assistant Overlay
 
 Status: `[ ]`
+
+Blocked by Model Loading Performance (#4).
 
 - [ ] Dedicated lightweight overlay Activity (currently opens full MainActivity)
 - [ ] Extract shared Flutter engine for both main and overlay Activities
 - [ ] Assistant-like experience on top of current app (like Claude/ChatGPT)
 
-### 5. Action Chips and Buttons
+### 6. Action Chips and Buttons
 
 Status: `[ ]`
 
@@ -75,7 +103,7 @@ Status: `[ ]`
 - [ ] Follow-up suggestion chips (Google Assistant-style)
 - [ ] Protocol-driven: buttons come from discovered OACP actions, not hardcoded
 
-### 6. Wake Word
+### 7. Wake Word
 
 Status: `[ ]`
 
