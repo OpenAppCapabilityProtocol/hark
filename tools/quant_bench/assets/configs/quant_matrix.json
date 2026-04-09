@@ -1,8 +1,9 @@
 {
-  "version": 1,
-  "description": "Hark llamadart quantization benchmark — matrix of (model, quant) combinations to test. Testing policy: start at the smallest quant (Q4_K_M), escalate to the next larger only if the smaller one fails the quality gate. Never test all three unless the first two fail.",
+  "version": 2,
+  "description": "Hark llamadart quantization benchmark — matrix of (model, quant) combinations to test. Uses ONLY first-party / top-tier GGUF publishers: ggml-org (official llama.cpp team) for EmbeddingGemma, Qwen (model author) for Qwen3. Neither publishes Q4_K_M or Q5_K_M for these specific models, so we test Q8_0 only. If Q8_0 passes the quality gate with room to spare, we ship it. If we later want a smaller variant for size reasons, that becomes an explicit trust decision about community quantizers — not something to default into.",
   "created": "2026-04-10",
-  "escalation_policy": "smallest-first",
+  "escalation_policy": "q8-only",
+  "trust_tier_note": "Current main branch ships onnx-community/embeddinggemma-300m-ONNX (model_q4.onnx) and litert-community/Qwen3-0.6B (Qwen3-0.6B.litertlm). These are the format-specific first-party orgs for ONNX and LiteRT-LM respectively. ggml-org and Qwen are the equivalent first-party tier for GGUF.",
   "models": {
     "embeddinggemma": {
       "kind": "embedding",
@@ -17,36 +18,15 @@
       },
       "quants": [
         {
-          "tag": "Q4_K_M",
-          "priority": 1,
-          "repo": "unsloth/embeddinggemma-300m-GGUF",
-          "filename_candidates": [
-            "embeddinggemma-300m-Q4_K_M.gguf",
-            "embeddinggemma-300M-Q4_K_M.gguf"
-          ],
-          "fallback_repos": [
-            "admiralakber/embeddinggemma-300m-Q4_K_M-GGUF",
-            "SandLogicTechnologies/EmbeddingGemma-300m-GGUF"
-          ],
-          "expected_size_mb": 236
-        },
-        {
-          "tag": "Q5_K_M",
-          "priority": 2,
-          "repo": "unsloth/embeddinggemma-300m-GGUF",
-          "filename_candidates": [
-            "embeddinggemma-300m-Q5_K_M.gguf"
-          ],
-          "expected_size_mb": 260
-        },
-        {
           "tag": "Q8_0",
-          "priority": 3,
+          "priority": 1,
           "repo": "ggml-org/embeddinggemma-300M-GGUF",
+          "publisher_tier": "first_party",
+          "publisher_note": "ggml-org is the official llama.cpp team — the GGUF format's inventors and the GGUF equivalent of onnx-community for ONNX.",
           "filename_candidates": [
             "embeddinggemma-300M-Q8_0.gguf"
           ],
-          "expected_size_mb": 329
+          "expected_size_mb": 313
         }
       ]
     },
@@ -63,44 +43,26 @@
       },
       "quants": [
         {
-          "tag": "Q4_K_M",
-          "priority": 1,
-          "repo": "unsloth/Qwen3-0.6B-GGUF",
-          "filename_candidates": [
-            "Qwen3-0.6B-Q4_K_M.gguf",
-            "Qwen3-0.6B-UD-Q4_K_XL.gguf"
-          ],
-          "fallback_repos": [
-            "bartowski/Qwen_Qwen3-0.6B-GGUF",
-            "Triangle104/Qwen3-0.6B-Q4_K_M-GGUF"
-          ],
-          "expected_size_mb": 397
-        },
-        {
-          "tag": "Q5_K_M",
-          "priority": 2,
-          "repo": "unsloth/Qwen3-0.6B-GGUF",
-          "filename_candidates": [
-            "Qwen3-0.6B-Q5_K_M.gguf"
-          ],
-          "expected_size_mb": 440
-        },
-        {
           "tag": "Q8_0",
-          "priority": 3,
+          "priority": 1,
           "repo": "Qwen/Qwen3-0.6B-GGUF",
+          "publisher_tier": "first_party",
+          "publisher_note": "Published by the Qwen team themselves — directly from Alibaba's model authors, same source as the litert-community Qwen3-0.6B.litertlm we currently ship.",
           "filename_candidates": [
             "Qwen3-0.6B-Q8_0.gguf"
           ],
-          "expected_size_mb": 639
+          "expected_size_mb": 610
         }
       ]
     }
   },
   "fallback_strategy": {
     "embedder_only_migration": {
-      "when": "If Qwen3 Q8_0 still fails slot-filling quality_gate, abandon the slot-filling migration and keep flutter_gemma for Qwen3. Only migrate the embedder.",
-      "implication": "Hark keeps two plugins (llamadart for embeddings, flutter_gemma for slot-fill) but still gets mmap + warm engine + isolate safety for the bigger model."
+      "when": "If Qwen3 Q8_0 fails the slot-filling quality gate, abandon the slot-filling migration and keep flutter_gemma for Qwen3. Only migrate the embedder.",
+      "implication": "Hark keeps two plugins (llamadart for embeddings, flutter_gemma for slot-fill) but still gets mmap + warm engine + isolate safety for the bigger model (the embedder)."
+    },
+    "community_quant_escalation": {
+      "when": "If we later need a smaller quant than Q8_0 for file-size reasons, the fallback is a trusted community quantizer (unsloth, bartowski, mradermacher) — but this is an EXPLICIT trust decision, not a default. Any switch away from ggml-org / Qwen must be justified by measured size or perf wins that cannot be ignored."
     }
   }
 }

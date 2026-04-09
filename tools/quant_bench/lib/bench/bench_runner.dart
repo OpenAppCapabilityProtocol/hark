@@ -245,10 +245,25 @@ class BenchRunner {
 
   /// Checks each filename candidate in [quant] against the models
   /// directory. Returns the first existing path, or null if none found.
+  ///
+  /// Matching is case-insensitive so that community quantization
+  /// repos with different capitalization conventions (e.g. admiralakber
+  /// uses `embeddinggemma-300m-q4_k_m.gguf` all-lowercase while unsloth
+  /// prefers `embeddinggemma-300M-Q4_K_M.gguf` camelCase) work without
+  /// updating quant_matrix.json for every new source.
   String? _resolveModelFile(QuantConfig quant) {
+    final dir = Directory(modelsDir);
+    if (!dir.existsSync()) return null;
+    final entries = dir
+        .listSync(followLinks: false)
+        .whereType<File>()
+        .toList(growable: false);
+    final lookup = <String, String>{
+      for (final f in entries) p.basename(f.path).toLowerCase(): f.path,
+    };
     for (final name in quant.filenameCandidates) {
-      final candidate = p.join(modelsDir, name);
-      if (File(candidate).existsSync()) return candidate;
+      final hit = lookup[name.toLowerCase()];
+      if (hit != null) return hit;
     }
     return null;
   }

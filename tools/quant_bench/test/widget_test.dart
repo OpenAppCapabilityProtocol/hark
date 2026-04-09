@@ -79,9 +79,9 @@ void main() {
     expect(matrix.models.containsKey('embeddinggemma'), isTrue);
     expect(matrix.models.containsKey('qwen3_06b'), isTrue);
 
-    // Both models should have 3 quants, priority-sorted.
+    // Each model has at least one quant, priority-sorted low → high.
     for (final model in matrix.models.values) {
-      expect(model.quants.length, 3);
+      expect(model.quants.isNotEmpty, isTrue);
       for (var i = 0; i < model.quants.length - 1; i++) {
         expect(
           model.quants[i].priority,
@@ -89,5 +89,9 @@ void main() {
         );
       }
     }
+
+    // v2 matrix uses only first-party Q8_0 sources.
+    expect(matrix.models['embeddinggemma']!.quants.first.tag, 'Q8_0');
+    expect(matrix.models['qwen3_06b']!.quants.first.tag, 'Q8_0');
   });
 }
