@@ -83,7 +83,7 @@ class SlotFillEvaluator {
         );
       }
 
-      if (_isHallucinated(parsed, c.expected, actionDef)) {
+      if (_isHallucinated(parsed, c.expected, c.utterance, actionDef)) {
         hallucinations += 1;
       }
     }
@@ -134,6 +134,20 @@ class SlotFillEvaluator {
     return buf.toString();
   }
 
+  /// Deterministic generation params used for every slot-fill case.
+  /// Zero temperature + fixed seed + top-k 1 collapses the distribution
+  /// to greedy decoding, which makes the bench reproducible run to run.
+  /// Without this llamadart's defaults introduce sampling noise and
+  /// each run produces different failures, making it impossible to
+  /// tell whether a metric change is a real improvement or variance.
+  static const _deterministicParams = GenerationParams(
+    temp: 0.0,
+    topK: 1,
+    topP: 1.0,
+    seed: 42,
+    maxTokens: 512,
+  );
+
   Future<String> _runGeneration(String prompt) async {
     final messages = <LlamaChatMessage>[
       LlamaChatMessage.fromText(
@@ -144,7 +158,11 @@ class SlotFillEvaluator {
 
     final buffer = StringBuffer();
     try {
-      await for (final chunk in engine.create(messages, enableThinking: false)) {
+      await for (final chunk in engine.create(
+        messages,
+        params: _deterministicParams,
+        enableThinking: false,
+      )) {
         for (final choice in chunk.choices) {
           final content = choice.delta.content;
           if (content != null) buffer.write(content);
@@ -252,19 +270,31 @@ class SlotFillEvaluator {
   }
 
   /// A result is "hallucinated" if any non-expected parameter got
-  /// populated with a value that isn't present in the utterance text.
-  /// This is a conservative heuristic — false positives are OK, we are
-  /// measuring the max plausible hallucination rate.
+  /// populated with a value that does NOT appear anywhere in the
+  /// utterance (case-insensitive substring match). Over-extraction of
+  /// words that are literally present in the utterance (like grabbing
+  /// "songs" out of "play songs by Taylor Swift" and sticking it in a
+  /// query field) is annoying but not strictly a hallucination — the
+  /// model isn't making anything up, it's just being over-eager. We
+  /// only flag the case where the model invents data that isn't in
+  /// the input at all.
   bool _isHallucinated(
     Map<String, dynamic> parsed,
     Map<String, dynamic> expected,
+    String utterance,
     SlotFillActionDef actionDef,
   ) {
+    final utteranceLower = utterance.toLowerCase();
     for (final p in actionDef.parameters) {
       if (expected.containsKey(p.name)) continue;
       final got = parsed[p.name];
       if (got == null) continue;
       if (!_nonEmpty(got)) continue;
+      final gotStr = got.toString().toLowerCase().trim();
+      if (gotStr.isEmpty) continue;
+      // If the extracted value is a substring of the utterance, it's
+      // an over-extraction, not a hallucination.
+      if (utteranceLower.contains(gotStr)) continue;
       return true;
     }
     return false;

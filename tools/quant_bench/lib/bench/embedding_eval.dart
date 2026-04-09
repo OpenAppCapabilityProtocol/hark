@@ -39,7 +39,9 @@ class EmbeddingEvaluator {
 
     _log('Embedding eval: running ${goldSet.cases.length} cases');
 
+    var top1Total = 0;
     var top1Correct = 0;
+    var top3Total = 0;
     var top3Hits = 0;
     var exactMatchTop1Correct = 0;
     var exactMatchTotal = 0;
@@ -70,6 +72,8 @@ class EmbeddingEvaluator {
 
       var caseTop1Correct = false;
       if (c.expectedTop1 != null) {
+        top1Total += 1;
+        top3Total += 1;
         caseTop1Correct = top1Key == c.expectedTop1!.key;
         if (caseTop1Correct) {
           top1Correct += 1;
@@ -88,6 +92,7 @@ class EmbeddingEvaluator {
 
       if (c.expectedInTop3.isNotEmpty) {
         disambiguationTotal += 1;
+        if (c.expectedTop1 == null) top3Total += 1;
         final allPresent =
             c.expectedInTop3.every((e) => top3Keys.contains(e.key));
         if (allPresent) {
@@ -112,7 +117,9 @@ class EmbeddingEvaluator {
 
     return EmbeddingMetrics(
       totalCases: goldSet.cases.length,
+      top1Total: top1Total,
       top1Correct: top1Correct,
+      top3Total: top3Total,
       top3Hits: top3Hits,
       exactMatchTop1Correct: exactMatchTop1Correct,
       exactMatchTotal: exactMatchTotal,

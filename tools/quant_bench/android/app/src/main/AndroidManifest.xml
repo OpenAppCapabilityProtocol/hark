@@ -1,8 +1,24 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      debuggable=true is set on purpose for this dev tool:
+        1. Allows `adb shell run-as com.oacp.hark.quant_bench` so we can
+           push GGUF files directly into the app's private internal
+           storage, bypassing the Android 11+ scoped-storage FUSE shim
+           that labels adb-pushed files as `media_rw_data_file` (which
+           the untrusted_app SELinux domain can't open/stat/readdir).
+        2. Allows `adb exec-out run-as ... cat` to pull results files
+           from the app's private documents dir for analysis.
+      This APK is never shipped. Do not copy this flag to hark-release.
+      HardcodedDebugMode lint is suppressed because this is a dev-only
+      benchmark harness.
+    -->
     <application
         android:label="quant_bench"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:debuggable="true"
+        tools:ignore="HardcodedDebugMode">
         <activity
             android:name=".MainActivity"
             android:exported="true"

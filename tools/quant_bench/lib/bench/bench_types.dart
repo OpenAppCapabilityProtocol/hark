@@ -422,7 +422,9 @@ class QuantMatrixConfig {
 class EmbeddingMetrics {
   const EmbeddingMetrics({
     required this.totalCases,
+    required this.top1Total,
     required this.top1Correct,
+    required this.top3Total,
     required this.top3Hits,
     required this.exactMatchTop1Correct,
     required this.exactMatchTotal,
@@ -432,8 +434,26 @@ class EmbeddingMetrics {
     required this.failureDetails,
   });
 
+  /// Total cases in the gold set. Not used as a metric denominator
+  /// any more — see [top1Total] and [top3Total] for the actual
+  /// denominators.
   final int totalCases;
+
+  /// Number of gold cases that specified an `expected_top1`. This is
+  /// the correct denominator for top-1 accuracy — only the cases that
+  /// asked a top-1 question are counted.
+  final int top1Total;
+
+  /// Number of top-1 cases where the predicted top action matched the
+  /// expected one.
   final int top1Correct;
+
+  /// Number of gold cases that had EITHER an expected_top1 or a
+  /// non-empty expected_in_top3. Used as the top-3 recall denominator.
+  final int top3Total;
+
+  /// Number of cases where the expected top1 (or all expected_in_top3
+  /// entries) were present in the actual top-3 predictions.
   final int top3Hits;
   final int exactMatchTop1Correct;
   final int exactMatchTotal;
@@ -442,8 +462,8 @@ class EmbeddingMetrics {
   final double avgTop1Score;
   final List<String> failureDetails;
 
-  double get top1Accuracy => totalCases == 0 ? 0 : top1Correct / totalCases;
-  double get top3Recall => totalCases == 0 ? 0 : top3Hits / totalCases;
+  double get top1Accuracy => top1Total == 0 ? 0 : top1Correct / top1Total;
+  double get top3Recall => top3Total == 0 ? 0 : top3Hits / top3Total;
   double get disambiguationCoverage => disambiguationTotal == 0
       ? 1.0
       : disambiguationCovered / disambiguationTotal;
@@ -452,8 +472,10 @@ class EmbeddingMetrics {
 
   Map<String, dynamic> toJson() => {
         'total_cases': totalCases,
+        'top1_total': top1Total,
         'top1_correct': top1Correct,
         'top1_accuracy': top1Accuracy,
+        'top3_total': top3Total,
         'top3_hits': top3Hits,
         'top3_recall': top3Recall,
         'exact_match_top1_correct': exactMatchTop1Correct,

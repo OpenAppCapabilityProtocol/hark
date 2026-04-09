@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -53,22 +54,82 @@ class _BenchHomePageState extends State<BenchHomePage> {
   }
 
   Future<void> _initDefaultModelsDir() async {
-    // Platform-specific default. On macOS, ~/Downloads/hark-bench-models
-    // is the sane default. On Android, we use the app's external storage
-    // directory so adb push targets are easy to script.
+    // Platform-specific default with an existence check. On macOS we
+    // try a list of candidates in priority order and pick the first
+    // one that actually exists. This handles both the README-documented
+    // ~/Downloads/hark-bench-models location AND the workspace-local
+    // temp/hark-bench-models location used for local development.
     if (Platform.isAndroid) {
-      final dir = await getExternalStorageDirectory();
-      if (dir != null && mounted) {
-        _modelsDirController.text = p.join(dir.path, 'hark-bench-models');
+      // Android scoped storage: files pushed to
+      // /storage/emulated/0/Android/data/<pkg>/files/ by `adb push` get
+      // the `media_rw_data_file` SELinux label, which our untrusted_app
+      // domain cannot open/stat/readdir. Instead, we use the app's
+      // INTERNAL private dir (ApplicationSupportDirectory) which lives
+      // at /data/user/0/<pkg>/files/ with the `app_data_file` label
+      // that the app has full access to.
+      //
+      // Files are pushed into this dir via `adb exec-out run-as <pkg>`
+      // piping from host stdin to `cat > files/bench_models/...`.
+      final supportDir = await getApplicationSupportDirectory();
+      if (mounted) {
+        _modelsDirController.text = p.join(supportDir.path, 'bench_models');
       }
     } else {
+      // macOS (and Linux) — we search in priority order:
+      //   1. $HARK_BENCH_MODELS_DIR if set (explicit override)
+      //   2. The workspace-local temp/hark-bench-models (dev default)
+      //   3. ~/Downloads/hark-bench-models (README default)
+      //   4. If none exist, fall through to #3 as a placeholder so the
+      //      user can see the expected shape and edit.
       final home = Platform.environment['HOME'] ?? '';
-      if (mounted) {
-        _modelsDirController.text =
-            p.join(home, 'Downloads', 'hark-bench-models');
+      final override = Platform.environment['HARK_BENCH_MODELS_DIR'];
+
+      // Known absolute candidates under $HOME. This list grows when we
+      // find other workspace layouts that need to work.
+      final absoluteCandidates = <String>[
+        p.join(home, 'flutter_projects', 'oacp.workspace', 'temp', 'hark-bench-models'),
+        p.join(home, 'Downloads', 'hark-bench-models'),
+      ];
+
+      // Best-effort walk-up from cwd (works when launched via `flutter
+      // run -d macos` from the project root; does NOT work when
+      // launched via Finder/`open` because the .app's cwd becomes '/').
+      final workspaceTemp = _findWorkspaceTemp();
+
+      final candidates = <String>[
+        if (override != null && override.isNotEmpty) override,
+        if (workspaceTemp != null) workspaceTemp,
+        ...absoluteCandidates,
+      ];
+
+      String? picked;
+      for (final c in candidates) {
+        if (Directory(c).existsSync()) {
+          picked = c;
+          break;
+        }
       }
+      picked ??= candidates.last; // last-resort placeholder
+      if (mounted) _modelsDirController.text = picked;
     }
     if (mounted) setState(() {});
+  }
+
+  /// Walks up from the current directory looking for a
+  /// `temp/hark-bench-models` sibling. Returns the absolute path if
+  /// found, or null otherwise. Used as the highest-priority macOS
+  /// default so `flutter run -d macos` from the project root "just
+  /// works" without editing the text field.
+  String? _findWorkspaceTemp() {
+    var dir = Directory.current.absolute;
+    for (var i = 0; i < 10; i++) {
+      final candidate = p.join(dir.path, 'temp', 'hark-bench-models');
+      if (Directory(candidate).existsSync()) return candidate;
+      final parent = dir.parent;
+      if (parent.path == dir.path) break;
+      dir = parent;
+    }
+    return null;
   }
 
   void _append(String line) {
@@ -82,6 +143,18 @@ class _BenchHomePageState extends State<BenchHomePage> {
         );
       }
     });
+  }
+
+  Future<void> _copyLog() async {
+    await Clipboard.setData(ClipboardData(text: _log.join('\n')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Copied ${_log.length} lines to clipboard'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _runBenchmark() async {
@@ -158,6 +231,12 @@ class _BenchHomePageState extends State<BenchHomePage> {
                   label: Text(_running ? 'Running...' : 'Run benchmark'),
                 ),
                 const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: _log.isEmpty ? null : _copyLog,
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy log'),
+                ),
+                const SizedBox(width: 12),
                 Text(
                   '${_results.length} result(s)',
                   style: Theme.of(context).textTheme.bodySmall,
@@ -167,14 +246,16 @@ class _BenchHomePageState extends State<BenchHomePage> {
             const SizedBox(height: 12),
             const Divider(),
             Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                itemCount: _log.length,
-                itemBuilder: (context, i) => Text(
-                  _log[i],
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12,
+              child: SelectionArea(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  itemCount: _log.length,
+                  itemBuilder: (context, i) => Text(
+                    _log[i],
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ),

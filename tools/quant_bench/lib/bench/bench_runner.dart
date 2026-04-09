@@ -96,8 +96,8 @@ class BenchRunner {
     required EmbeddingGoldSet embeddingGold,
     required SlotFillGoldSet slotFillGold,
   }) async {
-    final path = _resolveModelFile(quant);
-    if (path == null) {
+    final resolved = await _resolveModelFile(quant);
+    if (resolved == null) {
       return QuantRunResult(
         modelId: model.modelId,
         displayName: model.displayName,
@@ -113,7 +113,8 @@ class BenchRunner {
             '${quant.filenameCandidates.join(", ")}',
       );
     }
-    final fileSize = File(path).lengthSync();
+    final path = resolved.path;
+    final fileSize = resolved.sizeBytes;
 
     _log('--- ${model.displayName} ${quant.tag} (${quant.tag}) ---');
     _log('  Path: $path (${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB)');
@@ -244,36 +245,74 @@ class BenchRunner {
   }
 
   /// Checks each filename candidate in [quant] against the models
-  /// directory. Returns the first existing path, or null if none found.
+  /// directory. Returns the first path that can be opened for reading,
+  /// or null if none can.
   ///
-  /// Matching is case-insensitive so that community quantization
-  /// repos with different capitalization conventions (e.g. admiralakber
-  /// uses `embeddinggemma-300m-q4_k_m.gguf` all-lowercase while unsloth
-  /// prefers `embeddinggemma-300M-Q4_K_M.gguf` camelCase) work without
-  /// updating quant_matrix.json for every new source.
-  String? _resolveModelFile(QuantConfig quant) {
+  /// Three-pass strategy to work around Android 11+ scoped storage +
+  /// SELinux restrictions on files placed under
+  /// `/storage/emulated/0/Android/data/<pkg>/files/...` by `adb push`:
+  ///
+  /// 1. **Case-insensitive listing** (works on macOS / Linux / iOS and
+  ///    any Android path where the files were created by the app
+  ///    itself). Best-effort — may throw `Directory listing failed` on
+  ///    Android when the files have the `media_rw_data_file` SELinux
+  ///    label from the FUSE adb-push shim.
+  /// 2. **Exact-match `open(O_RDONLY)` probe**. If listing throws or
+  ///    didn't find a match, try to open each candidate path directly
+  ///    via [File.open]. This uses the `open()` syscall, which has an
+  ///    SELinux allow rule for `untrusted_app` on `media_rw_data_file`
+  ///    even though `stat()` and `readdir()` do not. If `open()`
+  ///    succeeds we know the file exists and is readable; we can even
+  ///    get its size from the [RandomAccessFile] without ever calling
+  ///    `stat`.
+  /// 3. **Fallback return**: if neither works, return null and the
+  ///    runner records the failure.
+  Future<_ResolvedModelFile?> _resolveModelFile(QuantConfig quant) async {
     final dir = Directory(modelsDir);
     if (!dir.existsSync()) return null;
-    final entries = dir
-        .listSync(followLinks: false)
-        .whereType<File>()
-        .toList(growable: false);
-    final lookup = <String, String>{
-      for (final f in entries) p.basename(f.path).toLowerCase(): f.path,
-    };
+
+    // Pass 1: case-insensitive listing (for hosts where readdir works).
+    try {
+      final entries = dir
+          .listSync(followLinks: false)
+          .whereType<File>()
+          .toList(growable: false);
+      final lookup = <String, String>{
+        for (final f in entries) p.basename(f.path).toLowerCase(): f.path,
+      };
+      for (final name in quant.filenameCandidates) {
+        final hit = lookup[name.toLowerCase()];
+        if (hit != null) {
+          final size = File(hit).lengthSync();
+          return _ResolvedModelFile(path: hit, sizeBytes: size);
+        }
+      }
+    } on FileSystemException catch (e) {
+      _log('  directory listing failed (${e.message}), '
+          'falling back to open() probe');
+    }
+
+    // Pass 2: open() probe. Works on Android scoped storage where
+    // stat()/readdir() are SELinux-blocked.
     for (final name in quant.filenameCandidates) {
-      final hit = lookup[name.toLowerCase()];
-      if (hit != null) return hit;
+      final candidate = p.join(modelsDir, name);
+      try {
+        final raf = await File(candidate).open(mode: FileMode.read);
+        try {
+          final size = await raf.length();
+          return _ResolvedModelFile(path: candidate, sizeBytes: size);
+        } finally {
+          await raf.close();
+        }
+      } on FileSystemException catch (_) {
+        // File not openable — try the next candidate.
+      }
     }
     return null;
   }
 
   Future<void> _writeResults(List<QuantRunResult> results) async {
-    final docsDir = await getApplicationDocumentsDirectory();
-    final outDir = Directory(p.join(docsDir.path, 'quant_bench'));
-    if (!outDir.existsSync()) outDir.createSync(recursive: true);
     final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-    final outFile = File(p.join(outDir.path, 'results_$timestamp.json'));
     final payload = {
       'version': 1,
       'timestamp': DateTime.now().toIso8601String(),
@@ -281,13 +320,58 @@ class BenchRunner {
       'models_dir': modelsDir,
       'results': results.map((r) => r.toJson()).toList(growable: false),
     };
-    await outFile.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(payload),
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(payload);
+
+    // Always write to internal app documents (for macOS where
+    // external storage doesn't exist and documents is easily
+    // accessible).
+    final docsDir = await getApplicationDocumentsDirectory();
+    final docsOutDir = Directory(p.join(docsDir.path, 'quant_bench'));
+    if (!docsOutDir.existsSync()) docsOutDir.createSync(recursive: true);
+    final docsFile = File(
+      p.join(docsOutDir.path, 'results_$timestamp.json'),
     );
-    _log('Results path: ${outFile.path}');
+    await docsFile.writeAsString(jsonStr);
+    _log('Results path: ${docsFile.path}');
+
+    // On Android, ALSO write to the app's scoped external storage
+    // directory. Release APKs don't expose app_flutter internal docs
+    // via `adb run-as`, but external storage under
+    // /storage/emulated/0/Android/data/<pkg>/files/ is pullable via
+    // plain `adb pull`. This makes results auto-fetchable from the
+    // host without requiring the user to manually export from the UI.
+    if (Platform.isAndroid) {
+      try {
+        final ext = await getExternalStorageDirectory();
+        if (ext != null) {
+          final extOutDir = Directory(p.join(ext.path, 'quant_bench'));
+          if (!extOutDir.existsSync()) extOutDir.createSync(recursive: true);
+          final extFile = File(
+            p.join(extOutDir.path, 'results_$timestamp.json'),
+          );
+          await extFile.writeAsString(jsonStr);
+          // Also overwrite a fixed-name "latest.json" so `adb pull`
+          // doesn't need to know the timestamp.
+          final latestFile = File(p.join(extOutDir.path, 'latest.json'));
+          await latestFile.writeAsString(jsonStr);
+          _log('External results: ${extFile.path}');
+          _log('Latest (pullable): ${latestFile.path}');
+        }
+      } catch (e) {
+        _log('Warning: could not write external results: $e');
+      }
+    }
   }
 
   void dispose() {
     _progressController.close();
   }
+}
+
+/// Result of a successful model-file probe: the path to use and the
+/// file size in bytes (obtained via a read-mode open, not a stat call).
+class _ResolvedModelFile {
+  const _ResolvedModelFile({required this.path, required this.sizeBytes});
+  final String path;
+  final int sizeBytes;
 }
