@@ -243,22 +243,35 @@ class _AppGroup {
   final List<AssistantAction> actions;
 }
 
-/// One card per app. Header = icon + name + count. Body = action rows.
-/// Each action row is one [_ActionRow] showing the primary example
-/// utterance as the main label and the humanized action id as the hint.
-class _AppSection extends StatelessWidget {
+/// One collapsible card per app. Collapsed state (default) shows just the
+/// app icon, name, and an action-count pill. Tap the header to expand and
+/// reveal the list of [_ActionRow]s for that app.
+class _AppSection extends StatefulWidget {
   const _AppSection({required this.group});
 
   final _AppGroup group;
 
   @override
+  State<_AppSection> createState() => _AppSectionState();
+}
+
+class _AppSectionState extends State<_AppSection>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+
+  void _toggle() => setState(() => _expanded = !_expanded);
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
+    final group = widget.group;
     final accent = _accentFor(group.domain, group.sourceId);
     final count = group.actions.length;
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: colors.muted.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(16),
@@ -270,67 +283,96 @@ class _AppSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Section header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _AppIconTile(packageName: group.sourceId, accent: accent),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    group.appName,
-                    style: typography.md.copyWith(
-                      color: colors.foreground,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: accent.withValues(alpha: 0.45),
-                      width: 1,
+          // Tappable header — always visible
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _AppIconTile(packageName: group.sourceId, accent: accent),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      group.appName,
+                      style: typography.md.copyWith(
+                        color: colors.foreground,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  child: Text(
-                    '$count',
-                    style: typography.xs.copyWith(
-                      color: accent,
-                      fontWeight: FontWeight.w700,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.45),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: typography.xs.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            height: 1,
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            color: colors.border.withValues(alpha: 0.5),
-          ),
-          // Action rows
-          for (var i = 0; i < group.actions.length; i++) ...[
-            _ActionRow(
-              action: group.actions[i],
-              accent: accent,
-              onTap: () => _showDetailsSheet(context, group.actions[i]),
-            ),
-            if (i != group.actions.length - 1)
-              Container(
-                height: 1,
-                margin: const EdgeInsets.only(left: 14, right: 14),
-                color: colors.border.withValues(alpha: 0.25),
+                  const SizedBox(width: 8),
+                  AnimatedRotation(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    turns: _expanded ? 0.25 : 0,
+                    child: Icon(
+                      FIcons.chevronRight,
+                      size: 18,
+                      color: colors.mutedForeground.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
               ),
-          ],
+            ),
+          ),
+          // Action rows — only when expanded
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: _expanded
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        height: 1,
+                        margin: const EdgeInsets.symmetric(horizontal: 14),
+                        color: colors.border.withValues(alpha: 0.5),
+                      ),
+                      for (var i = 0; i < group.actions.length; i++) ...[
+                        _ActionRow(
+                          action: group.actions[i],
+                          accent: accent,
+                          onTap: () =>
+                              _showDetailsSheet(context, group.actions[i]),
+                        ),
+                        if (i != group.actions.length - 1)
+                          Container(
+                            height: 1,
+                            margin: const EdgeInsets.only(left: 14, right: 14),
+                            color: colors.border.withValues(alpha: 0.25),
+                          ),
+                      ],
+                      const SizedBox(height: 4),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -435,40 +477,29 @@ class _AppIconTile extends ConsumerWidget {
     final info = ref.watch(appInfoProvider(packageName));
     final colors = context.theme.colors;
     const double size = 40;
-    final radius = BorderRadius.circular(11);
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        border: Border.all(
-          color: accent.withValues(alpha: 0.55),
-          width: 1.2,
-        ),
-      ),
-      padding: const EdgeInsets.all(1.5),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(9.5),
-        child: SizedBox.square(
-          dimension: size,
-          child: info.when(
-            data: (appInfo) {
-              final iconBytes = appInfo?.icon;
-              if (iconBytes == null || iconBytes.isEmpty) {
-                return _IconFallback(color: accent);
-              }
-              return Image.memory(
-                iconBytes,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.medium,
-                gaplessPlayback: true,
-                cacheWidth: 96,
-                cacheHeight: 96,
-                errorBuilder: (_, _, _) => _IconFallback(color: accent),
-              );
-            },
-            loading: () => ColoredBox(color: colors.muted),
-            error: (_, _) => _IconFallback(color: accent),
-          ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox.square(
+        dimension: size,
+        child: info.when(
+          data: (appInfo) {
+            final iconBytes = appInfo?.icon;
+            if (iconBytes == null || iconBytes.isEmpty) {
+              return _IconFallback(color: accent);
+            }
+            return Image.memory(
+              iconBytes,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium,
+              gaplessPlayback: true,
+              cacheWidth: 96,
+              cacheHeight: 96,
+              errorBuilder: (_, _, _) => _IconFallback(color: accent),
+            );
+          },
+          loading: () => ColoredBox(color: colors.muted),
+          error: (_, _) => _IconFallback(color: accent),
         ),
       ),
     );
