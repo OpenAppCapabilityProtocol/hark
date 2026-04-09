@@ -88,9 +88,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ChatBubble(message: chat.messages[index]),
                   ),
           ),
+          // Show the status line whenever any pipeline state is active —
+          // mic listening, NLU thinking, speaking/executing, or during
+          // initial model load. Previously this was gated on `!init.isReady`
+          // which hid the line exactly when it mattered most (during
+          // _processTranscript after models are loaded).
           if (chat.statusText.isNotEmpty &&
-              chat.messages.isNotEmpty &&
-              !init.isReady)
+              (chat.isThinking ||
+                  chat.isListening ||
+                  !init.isReady ||
+                  chat.isInitializing))
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: Text(
