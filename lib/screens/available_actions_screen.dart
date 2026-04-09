@@ -572,27 +572,29 @@ class _ActionDetailsSheet extends StatelessWidget {
     final optionalParams =
         action.parameters.where((p) => !p.required).toList(growable: false);
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: colors.mutedForeground.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
+    // Required by forui: the sheet builder must return a widget with an
+    // explicit background colour. Without this the content renders
+    // transparent over the page behind (the bottom-sheet transport does
+    // not provide a default background).
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border(
+          top: BorderSide(color: colors.border),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                 children: [
                   _AppIconTile(
                     packageName: action.sourceId,
@@ -668,8 +670,9 @@ class _ActionDetailsSheet extends StatelessWidget {
                     for (final p in optionalParams) _ParamChip(parameter: p),
                   ],
                 ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
