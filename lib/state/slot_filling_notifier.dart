@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 
@@ -6,6 +7,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/assistant_action.dart';
+import 'services_providers.dart';
 
 /// Lifecycle stages of the slot-filling model — identical to the values
 /// exposed by the legacy [SlotFillingService] so the splash screen can keep
@@ -311,6 +313,12 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
   }
 
   Future<void> _initialize() async {
+    // HarkLoadPerf: timing breakdown of each phase of model loading.
+    // Emits `HarkLoadPerf: slot_filling.<phase> <ms>ms` via debugPrint and
+    // appends to model_load_logs/load_<date>.jsonl for later analysis.
+    // See docs/plans/llamadart-migration.md slice 1 for context.
+    final logger = ref.read(inferenceLoggerProvider);
+    final totalSw = Stopwatch()..start();
     try {
       debugPrint('SlotFillingNotifier: starting initialization...');
       _setState(const SlotFillingState(
@@ -318,10 +326,19 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
         message: 'Initializing slot-filling runtime...',
       ));
 
+      final runtimeSw = Stopwatch()..start();
       await FlutterGemma.initialize();
+      runtimeSw.stop();
+      unawaited(logger.logModelLoad(
+          'slot_filling.runtime_init', runtimeSw.elapsedMilliseconds));
 
       // Check if model is already installed.
-      if (FlutterGemma.hasActiveModel()) {
+      final hasActiveSw = Stopwatch()..start();
+      final hasActive = FlutterGemma.hasActiveModel();
+      hasActiveSw.stop();
+      unawaited(logger.logModelLoad(
+          'slot_filling.has_active_check', hasActiveSw.elapsedMilliseconds));
+      if (hasActive) {
         debugPrint(
             'SlotFillingNotifier: model already installed, loading...');
         _setState(const SlotFillingState(
@@ -355,7 +372,11 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
       }
 
       // Create the model with small context — slot filling needs very little.
+      final openSw = Stopwatch()..start();
       final model = await FlutterGemma.getActiveModel(maxTokens: 512);
+      openSw.stop();
+      unawaited(logger.logModelLoad(
+          'slot_filling.model_open', openSw.elapsedMilliseconds));
 
       if (_disposed) {
         // A dispose happened while awaiting the model — don't leak it.
@@ -369,6 +390,10 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
         message: 'Qwen3 ready',
         model: model,
       ));
+      totalSw.stop();
+      unawaited(logger.logModelLoad(
+          'slot_filling.total', totalSw.elapsedMilliseconds,
+          extra: {'path': hasActive ? 'cache_hit' : 'downloaded'}));
     } catch (error, stackTrace) {
       debugPrint('SlotFillingNotifier: failed to initialize: $error');
       debugPrint('SlotFillingNotifier: $stackTrace');
@@ -376,6 +401,10 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
         stage: SlotFillingStage.failed,
         message: 'Slot-filling model failed: $error',
       ));
+      totalSw.stop();
+      unawaited(logger.logModelLoad(
+          'slot_filling.total', totalSw.elapsedMilliseconds,
+          extra: {'path': 'failed'}));
       _initFuture = null;
     }
   }

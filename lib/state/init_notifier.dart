@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'embedding_notifier.dart';
 import 'registry_provider.dart';
+import 'services_providers.dart';
 import 'slot_filling_notifier.dart';
 
 /// Aggregate "is the app ready to accept voice commands?" state.
@@ -69,18 +72,35 @@ class InitState {
 }
 
 class InitNotifier extends Notifier<InitState> {
+  // HarkLoadPerf: wall-time Stopwatch that starts when the notifier is
+  // first built (shortly after splash). When all three dependencies flip
+  // to ready, we log `init.all_ready` once. This is the end-to-end
+  // "cold start to usable" number that PHASE2 cares about.
+  final Stopwatch _buildSw = Stopwatch()..start();
+  bool _allReadyLogged = false;
+
   @override
   InitState build() {
     final embedding = ref.watch(embeddingProvider);
     final slotFilling = ref.watch(slotFillingProvider);
     final registry = ref.watch(capabilityRegistryProvider);
 
-    return InitState(
+    final next = InitState(
       embedding: embedding,
       slotFilling: slotFilling,
       registryReady: registry.hasValue,
       registryError: registry.hasError ? registry.error : null,
     );
+
+    if (next.isReady && !_allReadyLogged) {
+      _allReadyLogged = true;
+      _buildSw.stop();
+      final logger = ref.read(inferenceLoggerProvider);
+      unawaited(logger.logModelLoad(
+          'init.all_ready', _buildSw.elapsedMilliseconds));
+    }
+
+    return next;
   }
 }
 
