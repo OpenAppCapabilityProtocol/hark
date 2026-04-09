@@ -7,11 +7,12 @@ import '../models/assistant_action.dart';
 import '../state/app_icon_provider.dart';
 import '../state/registry_provider.dart';
 
-/// Browse every capability Hark knows how to execute.
+/// "What you can say" — a swipeable deck of example utterances, one card per
+/// (action, example) pair, backed by `capabilityRegistryProvider`.
 ///
-/// The data backing this screen is the live `capabilityRegistryProvider`
-/// (a [FutureProvider]) — the refresh button re-invalidates the provider
-/// which kicks off a fresh OACP scan.
+/// This screen is intentionally NOT a schema browser. It's a discovery
+/// surface: one card = one thing the user can say to Hark. Swipe to browse,
+/// tap for details (parameters, alt examples, full description).
 class AvailableActionsScreen extends ConsumerStatefulWidget {
   const AvailableActionsScreen({super.key});
 
@@ -22,12 +23,12 @@ class AvailableActionsScreen extends ConsumerStatefulWidget {
 
 class _AvailableActionsScreenState
     extends ConsumerState<AvailableActionsScreen> {
-  final TextEditingController _searchController = TextEditingController();
-  String _query = '';
+  final PageController _pageController = PageController(viewportFraction: 0.88);
+  int _currentIndex = 0;
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -42,7 +43,7 @@ class _AvailableActionsScreenState
 
     return FScaffold(
       header: FHeader.nested(
-        title: const Text('Actions'),
+        title: const Text('What you can say'),
         prefixes: [
           FButton.icon(
             onPress: () => context.pop(),
@@ -58,9 +59,7 @@ class _AvailableActionsScreenState
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: FCircularProgress(
-                      size: FCircularProgressSizeVariant.sm,
-                    ),
+                    child: FCircularProgress(size: FCircularProgressSizeVariant.sm),
                   )
                 : const Icon(FIcons.refreshCw),
           ),
@@ -69,135 +68,21 @@ class _AvailableActionsScreenState
       child: registryAsync.when(
         skipLoadingOnRefresh: true,
         skipLoadingOnReload: true,
-        data: (registry) => _ActionsBody(
-          actions: registry.actions,
-          searchController: _searchController,
-          query: _query,
-          onQueryChanged: (value) {
-            setState(() {
-              _query = value.trim().toLowerCase();
-            });
-          },
-        ),
+        data: (registry) {
+          final cards = _buildCards(registry.actions);
+          if (cards.isEmpty) return const _EmptyState();
+          return _UtteranceDeck(
+            cards: cards,
+            pageController: _pageController,
+            currentIndex: _currentIndex,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            totalActions: _uniqueActionCount(registry.actions),
+            totalApps: _uniqueAppCount(registry.actions),
+          );
+        },
         loading: () => const Center(child: FCircularProgress()),
         error: (error, _) => _ErrorState(message: error.toString()),
       ),
-    );
-  }
-}
-
-class _ActionsBody extends StatelessWidget {
-  const _ActionsBody({
-    required this.actions,
-    required this.searchController,
-    required this.query,
-    required this.onQueryChanged,
-  });
-
-  final List<AssistantAction> actions;
-  final TextEditingController searchController;
-  final String query;
-  final ValueChanged<String> onQueryChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.theme.colors;
-    final typography = context.theme.typography;
-
-    if (actions.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(FIcons.sparkles, size: 48, color: colors.mutedForeground),
-              const SizedBox(height: 16),
-              Text(
-                'No OACP actions discovered.',
-                textAlign: TextAlign.center,
-                style: typography.lg.copyWith(
-                  color: colors.foreground,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Install an app that declares an oacp.json content provider and tap refresh.',
-                textAlign: TextAlign.center,
-                style:
-                    typography.sm.copyWith(color: colors.mutedForeground),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final groups = _groupByApp(actions, query);
-
-    // Header (summary + search) + per-app FCards in a single lazy list.
-    // ListView.builder keeps offscreen cards out of the widget tree so
-    // scroll stays 60fps when there are 14+ apps. The header is treated
-    // as index 0 so the whole list scrolls together.
-    const headerItemCount = 1;
-    final groupCount = groups.isEmpty ? 1 : groups.length;
-
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: headerItemCount + groupCount,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _SummaryRow(
-                  actionCount: actions.length,
-                  integrationCount: _uniqueAppCount(actions),
-                ),
-                const SizedBox(height: 16),
-                FTextField(
-                  control: FTextFieldControl.managed(
-                    controller: searchController,
-                    onChange: (value) => onQueryChanged(value.text),
-                  ),
-                  hint: 'Filter by app, action, or description',
-                  prefixBuilder: (context, style, variants) => Padding(
-                    padding: const EdgeInsetsDirectional.only(
-                      start: 10,
-                      end: 8,
-                    ),
-                    child: Icon(
-                      FIcons.search,
-                      size: 18,
-                      color: context.theme.colors.mutedForeground,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-        if (groups.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32),
-            child: Center(
-              child: Text(
-                'No matches for "${searchController.text}".',
-                style:
-                    typography.sm.copyWith(color: colors.mutedForeground),
-              ),
-            ),
-          );
-        }
-        final group = groups[index - headerItemCount];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: _AppGroupCard(group: group),
-        );
-      },
     );
   }
 
@@ -211,133 +96,555 @@ class _ActionsBody extends StatelessWidget {
     return ids.length;
   }
 
-  List<_AppGroup> _groupByApp(List<AssistantAction> actions, String query) {
-    final grouped = <String, List<AssistantAction>>{};
-    for (final action in actions) {
-      if (action.sourceType != AssistantActionSourceType.oacp) continue;
-      if (!_matchesQuery(action, query)) continue;
-      grouped.putIfAbsent(action.sourceId, () => []).add(action);
-    }
-
-    final groups = grouped.entries.map((entry) {
-      final sorted = [...entry.value]
-        ..sort((a, b) => a.actionId.compareTo(b.actionId));
-      return _AppGroup(
-        sourceId: entry.key,
-        // All actions from the same app share the same manifest.displayName
-        // (it's the app name, not a per-capability label).
-        appName: sorted.first.displayName,
-        actions: sorted,
-      );
-    }).toList(growable: false);
-
-    groups.sort((a, b) => a.appName.compareTo(b.appName));
-    return groups;
+  int _uniqueActionCount(List<AssistantAction> actions) {
+    return actions
+        .where((a) => a.sourceType == AssistantActionSourceType.oacp)
+        .length;
   }
 
-  bool _matchesQuery(AssistantAction action, String query) {
-    if (query.isEmpty) return true;
-    final haystack = [
-      action.displayName,
-      action.sourceId,
-      action.actionId,
-      action.description,
-      ...action.examples,
-      ...action.parameters.map((p) => p.name),
-    ].join(' ').toLowerCase();
-    return haystack.contains(query);
+  /// Flatten actions into a deck where each (action, example) pair is one
+  /// card. Actions with no examples contribute a single card whose utterance
+  /// is derived from the humanized action id. Sorted alphabetically by app
+  /// name, then by the original example order within the action — stable so
+  /// the deck doesn't reshuffle on rebuild.
+  List<_UtteranceCard> _buildCards(List<AssistantAction> actions) {
+    final oacp = actions
+        .where((a) => a.sourceType == AssistantActionSourceType.oacp)
+        .toList()
+      ..sort((a, b) {
+        final byApp = a.displayName.compareTo(b.displayName);
+        if (byApp != 0) return byApp;
+        return a.actionId.compareTo(b.actionId);
+      });
+
+    final cards = <_UtteranceCard>[];
+    for (final action in oacp) {
+      if (action.examples.isEmpty) {
+        cards.add(_UtteranceCard(
+          action: action,
+          utterance: _humanizeActionId(action.actionId),
+          exampleIndex: 0,
+          exampleCount: 1,
+        ));
+      } else {
+        for (var i = 0; i < action.examples.length; i++) {
+          cards.add(_UtteranceCard(
+            action: action,
+            utterance: action.examples[i],
+            exampleIndex: i,
+            exampleCount: action.examples.length,
+          ));
+        }
+      }
+    }
+    return cards;
   }
 }
 
 // ----------------------------------------------------------------------------
 
-class _AppGroup {
-  const _AppGroup({
-    required this.sourceId,
-    required this.appName,
-    required this.actions,
+class _UtteranceCard {
+  const _UtteranceCard({
+    required this.action,
+    required this.utterance,
+    required this.exampleIndex,
+    required this.exampleCount,
   });
 
-  final String sourceId;
-  final String appName;
-  final List<AssistantAction> actions;
+  final AssistantAction action;
+  final String utterance;
+  final int exampleIndex;
+  final int exampleCount;
 }
 
-class _AppGroupCard extends StatelessWidget {
-  const _AppGroupCard({required this.group});
+// ----------------------------------------------------------------------------
 
-  final _AppGroup group;
+class _UtteranceDeck extends StatelessWidget {
+  const _UtteranceDeck({
+    required this.cards,
+    required this.pageController,
+    required this.currentIndex,
+    required this.onPageChanged,
+    required this.totalActions,
+    required this.totalApps,
+  });
+
+  final List<_UtteranceCard> cards;
+  final PageController pageController;
+  final int currentIndex;
+  final ValueChanged<int> onPageChanged;
+  final int totalActions;
+  final int totalApps;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.theme.colors;
     final typography = context.theme.typography;
-    final count = group.actions.length;
+    final colors = context.theme.colors;
 
-    return FCard.raw(
+    return Column(
+      children: [
+        Expanded(
+          child: PageView.builder(
+            controller: pageController,
+            itemCount: cards.length,
+            onPageChanged: onPageChanged,
+            itemBuilder: (context, index) {
+              final card = cards[index];
+              final isActive = index == currentIndex;
+              return _UtteranceCardView(card: card, isActive: isActive);
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        _PageCounter(
+          current: currentIndex + 1,
+          total: cards.length,
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 20),
+          child: Text(
+            '$totalActions things · $totalApps apps',
+            style: typography.xs.copyWith(
+              color: colors.mutedForeground,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+
+class _UtteranceCardView extends StatelessWidget {
+  const _UtteranceCardView({required this.card, required this.isActive});
+
+  final _UtteranceCard card;
+  final bool isActive;
+
+  @override
+  Widget build(BuildContext context) {
+    final typography = context.theme.typography;
+    final gradient = _gradientFor(card.action.domain, card.action.sourceId);
+
+    return AnimatedScale(
+      scale: isActive ? 1.0 : 0.94,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _AppIcon(packageName: group.sourceId),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        group.appName,
-                        style: typography.lg.copyWith(
-                          color: colors.foreground,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${group.sourceId} · $count action${count == 1 ? '' : 's'}',
-                        style: typography.xs.copyWith(
-                          color: colors.mutedForeground,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _showDetailsSheet(context, card),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: gradient.first.withValues(alpha: 0.35),
+                  blurRadius: 28,
+                  offset: const Offset(0, 14),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            FAccordion(
-              children: [
-                for (final action in group.actions)
-                  FAccordionItem(
-                    title: Text(
-                      _humanizeActionId(action.actionId),
-                      style: typography.sm.copyWith(
-                        color: colors.foreground,
-                        fontWeight: FontWeight.w600,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      _AppIconLarge(packageName: card.action.sourceId),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              card.action.displayName,
+                              style: typography.md.copyWith(
+                                color: _onGradient.withValues(alpha: 0.95),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (card.action.domain != null &&
+                                card.action.domain!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  card.action.domain!.toLowerCase(),
+                                  style: typography.xs.copyWith(
+                                    color: _onGradient.withValues(alpha: 0.7),
+                                    letterSpacing: 0.4,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text(
+                            '\u201c${card.utterance}\u201d',
+                            textAlign: TextAlign.center,
+                            style: typography.xl2.copyWith(
+                              color: _onGradient,
+                              fontWeight: FontWeight.w700,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                    child: _ActionDetails(action: action),
                   ),
-              ],
+                  Container(
+                    height: 1,
+                    color: _onGradient.withValues(alpha: 0.18),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        FIcons.chevronUp,
+                        size: 14,
+                        color: _onGradient.withValues(alpha: 0.7),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'tap for details',
+                        style: typography.xs.copyWith(
+                          color: _onGradient.withValues(alpha: 0.7),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _AppIcon extends ConsumerWidget {
-  const _AppIcon({required this.packageName});
+// ----------------------------------------------------------------------------
+
+/// Solid white foreground used on every gradient card. All gradient pairs in
+/// [_domainGradients] are chosen so white text at ≥0.7 alpha remains legible.
+const Color _onGradient = Color(0xFFFFFFFF);
+
+/// Hand-tuned gradient pairs per OACP `domain`. Falls back to
+/// [_fallbackGradients] indexed by a hash of the source package name so
+/// unknown domains still get a stable, distinct colour per app.
+const Map<String, List<Color>> _domainGradients = {
+  'music':         [Color(0xFF7C3AED), Color(0xFFEC4899)],
+  'audio':         [Color(0xFF7C3AED), Color(0xFFEC4899)],
+  'media':         [Color(0xFFD97706), Color(0xFFF59E0B)],
+  'knowledge':     [Color(0xFF2563EB), Color(0xFF06B6D4)],
+  'reference':     [Color(0xFF0891B2), Color(0xFF14B8A6)],
+  'encyclopedia':  [Color(0xFF2563EB), Color(0xFF06B6D4)],
+  'search':        [Color(0xFF2563EB), Color(0xFF06B6D4)],
+  'navigation':    [Color(0xFF059669), Color(0xFF84CC16)],
+  'maps':          [Color(0xFF059669), Color(0xFF84CC16)],
+  'camera':        [Color(0xFFF97316), Color(0xFFEF4444)],
+  'photo':         [Color(0xFFF97316), Color(0xFFEF4444)],
+  'communication': [Color(0xFF10B981), Color(0xFF3B82F6)],
+  'messaging':     [Color(0xFF10B981), Color(0xFF3B82F6)],
+  'productivity':  [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+  'tasks':         [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+  'calendar':      [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+  'utility':       [Color(0xFF64748B), Color(0xFF334155)],
+  'tools':         [Color(0xFF64748B), Color(0xFF334155)],
+  'file':          [Color(0xFF64748B), Color(0xFF334155)],
+  'files':         [Color(0xFF64748B), Color(0xFF334155)],
+  'health':        [Color(0xFFE11D48), Color(0xFFBE185D)],
+  'fitness':       [Color(0xFFE11D48), Color(0xFFBE185D)],
+  'weather':       [Color(0xFF0EA5E9), Color(0xFF6366F1)],
+  'reading':       [Color(0xFF92400E), Color(0xFFF59E0B)],
+  'scanner':       [Color(0xFFF97316), Color(0xFFEF4444)],
+  'barcode':       [Color(0xFFF97316), Color(0xFFEF4444)],
+  'recording':     [Color(0xFFDB2777), Color(0xFF9333EA)],
+  'voice':         [Color(0xFFDB2777), Color(0xFF9333EA)],
+};
+
+const List<List<Color>> _fallbackGradients = [
+  [Color(0xFF8B5CF6), Color(0xFFEC4899)],
+  [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
+  [Color(0xFF14B8A6), Color(0xFF3B82F6)],
+  [Color(0xFFF59E0B), Color(0xFFEF4444)],
+  [Color(0xFF22C55E), Color(0xFF14B8A6)],
+  [Color(0xFFEC4899) ,Color(0xFFF97316)],
+];
+
+List<Color> _gradientFor(String? domain, String sourceId) {
+  if (domain != null) {
+    final key = domain.toLowerCase().trim();
+    final hit = _domainGradients[key];
+    if (hit != null) return hit;
+  }
+  final hash = sourceId.hashCode.abs();
+  return _fallbackGradients[hash % _fallbackGradients.length];
+}
+
+// ----------------------------------------------------------------------------
+
+class _AppIconLarge extends ConsumerWidget {
+  const _AppIconLarge({required this.packageName});
+
+  final String packageName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final info = ref.watch(appInfoProvider(packageName));
+    const double size = 52;
+    const radius = BorderRadius.all(Radius.circular(14));
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        color: _onGradient.withValues(alpha: 0.14),
+        border: Border.all(
+          color: _onGradient.withValues(alpha: 0.25),
+          width: 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: SizedBox.square(
+          dimension: size,
+          child: info.when(
+            data: (appInfo) {
+              final iconBytes = appInfo?.icon;
+              if (iconBytes == null || iconBytes.isEmpty) {
+                return const Icon(
+                  FIcons.package,
+                  size: 22,
+                  color: _onGradient,
+                );
+              }
+              return Image.memory(
+                iconBytes,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.medium,
+                gaplessPlayback: true,
+                cacheWidth: 120,
+                cacheHeight: 120,
+                errorBuilder: (_, _, _) => const Icon(
+                  FIcons.package,
+                  size: 22,
+                  color: _onGradient,
+                ),
+              );
+            },
+            loading: () => const SizedBox(),
+            error: (_, _) => const Icon(
+              FIcons.package,
+              size: 22,
+              color: _onGradient,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+
+class _PageCounter extends StatelessWidget {
+  const _PageCounter({required this.current, required this.total});
+
+  final int current;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final typography = context.theme.typography;
+    final colors = context.theme.colors;
+
+    // Dots for small decks, "n / total" text for bigger ones.
+    if (total <= 10) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (var i = 0; i < total; i++)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: i == current - 1 ? 20 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: i == current - 1
+                    ? colors.primary
+                    : colors.mutedForeground.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+        ],
+      );
+    }
+    return Text(
+      '$current / $total',
+      style: typography.xs.copyWith(
+        color: colors.mutedForeground,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+
+Future<void> _showDetailsSheet(BuildContext context, _UtteranceCard card) {
+  return showFSheet<void>(
+    context: context,
+    side: FLayout.btt,
+    mainAxisMaxRatio: 0.75,
+    builder: (sheetContext) => _ActionDetailsSheet(card: card),
+  );
+}
+
+class _ActionDetailsSheet extends StatelessWidget {
+  const _ActionDetailsSheet({required this.card});
+
+  final _UtteranceCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final typography = context.theme.typography;
+    final action = card.action;
+    final requiredParams =
+        action.parameters.where((p) => p.required).toList(growable: false);
+    final optionalParams =
+        action.parameters.where((p) => !p.required).toList(growable: false);
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colors.mutedForeground.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  _SheetAppIcon(packageName: action.sourceId),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          action.displayName,
+                          style: typography.md.copyWith(
+                            color: colors.foreground,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          _humanizeActionId(action.actionId),
+                          style: typography.sm.copyWith(
+                            color: colors.mutedForeground,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (action.description.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Text(
+                  action.description,
+                  style: typography.sm.copyWith(color: colors.foreground),
+                ),
+              ],
+              if (action.examples.length > 1) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Also try',
+                  style: typography.xs.copyWith(
+                    color: colors.mutedForeground,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (var i = 0; i < action.examples.length; i++)
+                  if (i != card.exampleIndex)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '\u201c${action.examples[i]}\u201d',
+                        style: typography.sm.copyWith(
+                          color: colors.mutedForeground,
+                        ),
+                      ),
+                    ),
+              ],
+              if (action.parameters.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Parameters',
+                  style: typography.xs.copyWith(
+                    color: colors.mutedForeground,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final p in requiredParams) _ParamChip(parameter: p),
+                    for (final p in optionalParams) _ParamChip(parameter: p),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetAppIcon extends ConsumerWidget {
+  const _SheetAppIcon({required this.packageName});
 
   final String packageName;
 
@@ -345,7 +652,7 @@ class _AppIcon extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final info = ref.watch(appInfoProvider(packageName));
     final colors = context.theme.colors;
-    const double size = 44;
+    const double size = 40;
     const radius = BorderRadius.all(Radius.circular(10));
 
     return ClipRRect(
@@ -356,11 +663,12 @@ class _AppIcon extends ConsumerWidget {
           data: (appInfo) {
             final iconBytes = appInfo?.icon;
             if (iconBytes == null || iconBytes.isEmpty) {
-              return _IconFallback(color: colors.mutedForeground);
+              return ColoredBox(
+                color: colors.muted,
+                child: Icon(FIcons.package,
+                    size: 18, color: colors.mutedForeground),
+              );
             }
-            // cacheWidth/cacheHeight force Flutter to decode the PNG at the
-            // display size (2x for dpr) instead of the native ~192px the
-            // plugin returns. Big win for scroll perf with 14+ icons.
             return Image.memory(
               iconBytes,
               fit: BoxFit.cover,
@@ -368,119 +676,24 @@ class _AppIcon extends ConsumerWidget {
               gaplessPlayback: true,
               cacheWidth: 96,
               cacheHeight: 96,
-              errorBuilder: (_, _, _) =>
-                  _IconFallback(color: colors.mutedForeground),
+              errorBuilder: (_, _, _) => ColoredBox(
+                color: colors.muted,
+                child: Icon(FIcons.package,
+                    size: 18, color: colors.mutedForeground),
+              ),
             );
           },
           loading: () => ColoredBox(color: colors.muted),
-          error: (_, _) => _IconFallback(color: colors.mutedForeground),
+          error: (_, _) => ColoredBox(
+            color: colors.muted,
+            child: Icon(FIcons.package,
+                size: 18, color: colors.mutedForeground),
+          ),
         ),
       ),
     );
   }
 }
-
-class _IconFallback extends StatelessWidget {
-  const _IconFallback({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.theme.colors;
-    return ColoredBox(
-      color: colors.muted,
-      child: Icon(FIcons.package, size: 20, color: color),
-    );
-  }
-}
-
-class _ActionDetails extends StatelessWidget {
-  const _ActionDetails({required this.action});
-
-  final AssistantAction action;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.theme.colors;
-    final typography = context.theme.typography;
-
-    final examples = action.examples.take(3).toList();
-    final requiredParams =
-        action.parameters.where((p) => p.required).toList(growable: false);
-    final optionalParams =
-        action.parameters.where((p) => !p.required).toList(growable: false);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (action.description.isNotEmpty)
-            Text(
-              action.description,
-              style: typography.sm.copyWith(color: colors.foreground),
-            ),
-          if (examples.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _SectionLabel('Try saying'),
-            const SizedBox(height: 6),
-            for (final example in examples)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '• “$example”',
-                  style:
-                      typography.sm.copyWith(color: colors.mutedForeground),
-                ),
-              ),
-          ],
-          if (action.parameters.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _SectionLabel('Parameters'),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final p in requiredParams) _ParamChip(parameter: p),
-                for (final p in optionalParams) _ParamChip(parameter: p),
-              ],
-            ),
-          ],
-          const SizedBox(height: 14),
-          _SectionLabel('Result'),
-          const SizedBox(height: 6),
-          Text(
-            _resultHint(action),
-            style: typography.sm.copyWith(color: colors.mutedForeground),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            action.actionId,
-            style: typography.xs.copyWith(
-              color: colors.mutedForeground,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _resultHint(AssistantAction action) {
-    if (action.resultTransportType == 'broadcast') {
-      return 'The app replies with a result — Hark will speak it back.';
-    }
-    final msg = action.confirmationMessage.trim();
-    if (msg.isEmpty) {
-      return 'Fire-and-forget. Hark dispatches the action and moves on.';
-    }
-    return 'Fire-and-forget. Hark will say: “$msg”.';
-  }
-}
-
-// ----------------------------------------------------------------------------
 
 class _ParamChip extends StatelessWidget {
   const _ParamChip({required this.parameter});
@@ -493,20 +706,18 @@ class _ParamChip extends StatelessWidget {
     final typography = context.theme.typography;
     final isRequired = parameter.required;
 
-    final bg = isRequired
-        ? colors.primary.withValues(alpha: 0.18)
-        : colors.muted;
-    final border = isRequired
-        ? colors.primary.withValues(alpha: 0.65)
-        : colors.border;
-    final fg = isRequired ? colors.primary : colors.foreground;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: bg,
+        color: isRequired
+            ? colors.primary.withValues(alpha: 0.18)
+            : colors.muted,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
+        border: Border.all(
+          color: isRequired
+              ? colors.primary.withValues(alpha: 0.65)
+              : colors.border,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -514,15 +725,13 @@ class _ParamChip extends StatelessWidget {
           Text(
             parameter.name,
             style: typography.xs.copyWith(
-              color: fg,
+              color: isRequired ? colors.primary : colors.foreground,
               fontWeight: FontWeight.w600,
             ),
           ),
           Text(
             '  ${parameter.type}${isRequired ? ' · required' : ''}',
-            style: typography.xs.copyWith(
-              color: colors.mutedForeground,
-            ),
+            style: typography.xs.copyWith(color: colors.mutedForeground),
           ),
         ],
       ),
@@ -532,95 +741,38 @@ class _ParamChip extends StatelessWidget {
 
 // ----------------------------------------------------------------------------
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-
-  final String text;
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
-    return Text(
-      text.toUpperCase(),
-      style: typography.xs2.copyWith(
-        color: colors.mutedForeground,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.6,
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(FIcons.sparkles, size: 48, color: colors.mutedForeground),
+            const SizedBox(height: 16),
+            Text(
+              'No apps integrated yet.',
+              textAlign: TextAlign.center,
+              style: typography.lg.copyWith(
+                color: colors.foreground,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Install an app that speaks OACP and tap refresh.',
+              textAlign: TextAlign.center,
+              style: typography.sm.copyWith(color: colors.mutedForeground),
+            ),
+          ],
+        ),
       ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.actionCount,
-    required this.integrationCount,
-  });
-
-  final int actionCount;
-  final int integrationCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final typography = context.theme.typography;
-    final colors = context.theme.colors;
-
-    return Row(
-      children: [
-        _Stat(
-          count: integrationCount,
-          label: integrationCount == 1 ? 'app' : 'apps',
-        ),
-        const SizedBox(width: 12),
-        Container(
-          width: 1,
-          height: 24,
-          color: colors.border,
-        ),
-        const SizedBox(width: 12),
-        _Stat(
-          count: actionCount,
-          label: actionCount == 1 ? 'action' : 'actions',
-        ),
-        const Spacer(),
-        Text(
-          'OACP only',
-          style: typography.xs.copyWith(color: colors.mutedForeground),
-        ),
-      ],
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({required this.count, required this.label});
-
-  final int count;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final typography = context.theme.typography;
-    final colors = context.theme.colors;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Text(
-          '$count',
-          style: typography.xl.copyWith(
-            color: colors.foreground,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: typography.xs.copyWith(color: colors.mutedForeground),
-        ),
-      ],
     );
   }
 }
@@ -640,11 +792,7 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              FIcons.triangleAlert,
-              size: 48,
-              color: colors.destructive,
-            ),
+            Icon(FIcons.triangleAlert, size: 48, color: colors.destructive),
             const SizedBox(height: 16),
             Text(
               'Could not load capabilities.',
