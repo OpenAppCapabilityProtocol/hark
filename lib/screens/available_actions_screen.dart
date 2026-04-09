@@ -7,11 +7,13 @@ import '../models/assistant_action.dart';
 import '../state/app_icon_provider.dart';
 import '../state/registry_provider.dart';
 
-/// Browse every capability Hark knows how to execute.
+/// "What you can say" — a grouped scrollable list of OACP capabilities.
 ///
-/// The data backing this screen is the live `capabilityRegistryProvider`
-/// (a [FutureProvider]) — the refresh button re-invalidates the provider
-/// which kicks off a fresh OACP scan.
+/// Apps are section headers; actions are rows inside each section. Each
+/// row's primary label is the first example utterance ("play next song"),
+/// with the humanized action id ("Next Song") as the secondary hint. Tap a
+/// row to open a bottom sheet with the full description, alt examples, and
+/// parameter chips.
 class AvailableActionsScreen extends ConsumerStatefulWidget {
   const AvailableActionsScreen({super.key});
 
@@ -42,7 +44,7 @@ class _AvailableActionsScreenState
 
     return FScaffold(
       header: FHeader.nested(
-        title: const Text('Actions'),
+        title: const Text('What you can say'),
         prefixes: [
           FButton.icon(
             onPress: () => context.pop(),
@@ -86,6 +88,8 @@ class _AvailableActionsScreenState
   }
 }
 
+// ----------------------------------------------------------------------------
+
 class _ActionsBody extends StatelessWidget {
   const _ActionsBody({
     required this.actions,
@@ -105,65 +109,35 @@ class _ActionsBody extends StatelessWidget {
     final typography = context.theme.typography;
 
     if (actions.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(FIcons.sparkles, size: 48, color: colors.mutedForeground),
-              const SizedBox(height: 16),
-              Text(
-                'No OACP actions discovered.',
-                textAlign: TextAlign.center,
-                style: typography.lg.copyWith(
-                  color: colors.foreground,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Install an app that declares an oacp.json content provider and tap refresh.',
-                textAlign: TextAlign.center,
-                style:
-                    typography.sm.copyWith(color: colors.mutedForeground),
-              ),
-            ],
-          ),
-        ),
-      );
+      return const _EmptyState();
     }
 
     final groups = _groupByApp(actions, query);
+    final totalActions = actions
+        .where((a) => a.sourceType == AssistantActionSourceType.oacp)
+        .length;
+    final totalApps = _uniqueAppCount(actions);
 
-    // Header (summary + search) + per-app FCards in a single lazy list.
-    // ListView.builder keeps offscreen cards out of the widget tree so
-    // scroll stays 60fps when there are 14+ apps. The header is treated
-    // as index 0 so the whole list scrolls together.
+    // Header (search + summary) + per-app sections in a single lazy list.
     const headerItemCount = 1;
     final groupCount = groups.isEmpty ? 1 : groups.length;
 
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       itemCount: headerItemCount + groupCount,
       itemBuilder: (context, index) {
         if (index == 0) {
           return Padding(
-            padding: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.only(bottom: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _SummaryRow(
-                  actionCount: actions.length,
-                  integrationCount: _uniqueAppCount(actions),
-                ),
-                const SizedBox(height: 16),
                 FTextField(
                   control: FTextFieldControl.managed(
                     controller: searchController,
                     onChange: (value) => onQueryChanged(value.text),
                   ),
-                  hint: 'Filter by app, action, or description',
+                  hint: 'Search apps and actions',
                   prefixBuilder: (context, style, variants) => Padding(
                     padding: const EdgeInsetsDirectional.only(
                       start: 10,
@@ -172,7 +146,18 @@ class _ActionsBody extends StatelessWidget {
                     child: Icon(
                       FIcons.search,
                       size: 18,
-                      color: context.theme.colors.mutedForeground,
+                      color: colors.mutedForeground,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Text(
+                    '$totalActions things · $totalApps apps',
+                    style: typography.xs.copyWith(
+                      color: colors.mutedForeground,
+                      letterSpacing: 0.2,
                     ),
                   ),
                 ),
@@ -182,20 +167,19 @@ class _ActionsBody extends StatelessWidget {
         }
         if (groups.isEmpty) {
           return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32),
+            padding: const EdgeInsets.symmetric(vertical: 48),
             child: Center(
               child: Text(
                 'No matches for "${searchController.text}".',
-                style:
-                    typography.sm.copyWith(color: colors.mutedForeground),
+                style: typography.sm.copyWith(color: colors.mutedForeground),
               ),
             ),
           );
         }
         final group = groups[index - headerItemCount];
         return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: _AppGroupCard(group: group),
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _AppSection(group: group),
         );
       },
     );
@@ -219,17 +203,18 @@ class _ActionsBody extends StatelessWidget {
       grouped.putIfAbsent(action.sourceId, () => []).add(action);
     }
 
-    final groups = grouped.entries.map((entry) {
-      final sorted = [...entry.value]
-        ..sort((a, b) => a.actionId.compareTo(b.actionId));
-      return _AppGroup(
-        sourceId: entry.key,
-        // All actions from the same app share the same manifest.displayName
-        // (it's the app name, not a per-capability label).
-        appName: sorted.first.displayName,
-        actions: sorted,
-      );
-    }).toList(growable: false);
+    final groups = grouped.entries
+        .map((entry) {
+          final sorted = [...entry.value]
+            ..sort((a, b) => a.actionId.compareTo(b.actionId));
+          return _AppGroup(
+            sourceId: entry.key,
+            appName: sorted.first.displayName,
+            domain: sorted.first.domain,
+            actions: sorted,
+          );
+        })
+        .toList(growable: false);
 
     groups.sort((a, b) => a.appName.compareTo(b.appName));
     return groups;
@@ -255,79 +240,228 @@ class _AppGroup {
   const _AppGroup({
     required this.sourceId,
     required this.appName,
+    required this.domain,
     required this.actions,
   });
 
   final String sourceId;
   final String appName;
+  final String? domain;
   final List<AssistantAction> actions;
 }
 
-class _AppGroupCard extends StatelessWidget {
-  const _AppGroupCard({required this.group});
+/// One collapsible card per app. Collapsed state (default) shows just the
+/// app icon, name, and an action-count pill. Tap the header to expand and
+/// reveal the list of [_ActionRow]s for that app.
+class _AppSection extends StatefulWidget {
+  const _AppSection({required this.group});
 
   final _AppGroup group;
+
+  @override
+  State<_AppSection> createState() => _AppSectionState();
+}
+
+class _AppSectionState extends State<_AppSection>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+
+  void _toggle() => setState(() => _expanded = !_expanded);
 
   @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
+    final group = widget.group;
+    final accent = _accentFor(group.domain, group.sourceId);
     final count = group.actions.length;
 
-    return FCard.raw(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _AppIcon(packageName: group.sourceId),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        group.appName,
-                        style: typography.lg.copyWith(
-                          color: colors.foreground,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${group.sourceId} · $count action${count == 1 ? '' : 's'}',
-                        style: typography.xs.copyWith(
-                          color: colors.mutedForeground,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            FAccordion(
-              children: [
-                for (final action in group.actions)
-                  FAccordionItem(
-                    title: Text(
-                      _humanizeActionId(action.actionId),
-                      style: typography.sm.copyWith(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: colors.muted.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colors.border.withValues(alpha: 0.6),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Tappable header — always visible
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _AppIconTile(packageName: group.sourceId, accent: accent),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      group.appName,
+                      style: typography.md.copyWith(
                         color: colors.foreground,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.45),
+                        width: 1,
                       ),
                     ),
-                    child: _ActionDetails(action: action),
+                    child: Text(
+                      '$count',
+                      style: typography.xs.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   ),
-              ],
+                  const SizedBox(width: 8),
+                  AnimatedRotation(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    turns: _expanded ? 0.25 : 0,
+                    child: Icon(
+                      FIcons.chevronRight,
+                      size: 18,
+                      color: colors.mutedForeground.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Action rows — only when expanded
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: _expanded
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        height: 1,
+                        margin: const EdgeInsets.symmetric(horizontal: 14),
+                        color: colors.border.withValues(alpha: 0.5),
+                      ),
+                      for (var i = 0; i < group.actions.length; i++) ...[
+                        _ActionRow(
+                          action: group.actions[i],
+                          accent: accent,
+                          onTap: () =>
+                              _showDetailsSheet(context, group.actions[i]),
+                        ),
+                        if (i != group.actions.length - 1)
+                          Container(
+                            height: 1,
+                            margin: const EdgeInsets.only(left: 14, right: 14),
+                            color: colors.border.withValues(alpha: 0.25),
+                          ),
+                      ],
+                      const SizedBox(height: 4),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
+    required this.action,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final AssistantAction action;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final typography = context.theme.typography;
+
+    final primary = action.examples.isNotEmpty
+        ? '\u201c${action.examples.first}\u201d'
+        : _humanizeActionId(action.actionId);
+    final secondary = action.examples.isNotEmpty
+        ? _humanizeActionId(action.actionId)
+        : action.description;
+    final secondaryTrimmed = secondary.trim();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.only(top: 6, right: 12),
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    primary,
+                    style: typography.sm.copyWith(
+                      color: colors.foreground,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (secondaryTrimmed.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      secondaryTrimmed,
+                      style: typography.xs.copyWith(
+                        color: colors.mutedForeground,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              FIcons.chevronRight,
+              size: 16,
+              color: colors.mutedForeground.withValues(alpha: 0.7),
             ),
           ],
         ),
@@ -336,31 +470,30 @@ class _AppGroupCard extends StatelessWidget {
   }
 }
 
-class _AppIcon extends ConsumerWidget {
-  const _AppIcon({required this.packageName});
+// ----------------------------------------------------------------------------
+
+class _AppIconTile extends ConsumerWidget {
+  const _AppIconTile({required this.packageName, required this.accent});
 
   final String packageName;
+  final Color accent;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final info = ref.watch(appInfoProvider(packageName));
     final colors = context.theme.colors;
-    const double size = 44;
-    const radius = BorderRadius.all(Radius.circular(10));
+    const double size = 40;
 
     return ClipRRect(
-      borderRadius: radius,
+      borderRadius: BorderRadius.circular(10),
       child: SizedBox.square(
         dimension: size,
         child: info.when(
           data: (appInfo) {
             final iconBytes = appInfo?.icon;
             if (iconBytes == null || iconBytes.isEmpty) {
-              return _IconFallback(color: colors.mutedForeground);
+              return _IconFallback(color: accent);
             }
-            // cacheWidth/cacheHeight force Flutter to decode the PNG at the
-            // display size (2x for dpr) instead of the native ~192px the
-            // plugin returns. Big win for scroll perf with 14+ icons.
             return Image.memory(
               iconBytes,
               fit: BoxFit.cover,
@@ -368,12 +501,11 @@ class _AppIcon extends ConsumerWidget {
               gaplessPlayback: true,
               cacheWidth: 96,
               cacheHeight: 96,
-              errorBuilder: (_, _, _) =>
-                  _IconFallback(color: colors.mutedForeground),
+              errorBuilder: (_, _, _) => _IconFallback(color: accent),
             );
           },
           loading: () => ColoredBox(color: colors.muted),
-          error: (_, _) => _IconFallback(color: colors.mutedForeground),
+          error: (_, _) => _IconFallback(color: accent),
         ),
       ),
     );
@@ -395,8 +527,78 @@ class _IconFallback extends StatelessWidget {
   }
 }
 
-class _ActionDetails extends StatelessWidget {
-  const _ActionDetails({required this.action});
+// ----------------------------------------------------------------------------
+
+/// Hand-tuned accent per OACP `domain`. Used for the app-icon border, the
+/// action-row bullet, and the action-count pill. The same palette the
+/// earlier swipe-deck variant used for its gradients, but applied as a
+/// single solid accent colour per app instead of a full-screen gradient.
+const Map<String, Color> _domainAccents = {
+  'music': Color(0xFFA855F7),
+  'audio': Color(0xFFA855F7),
+  'media': Color(0xFFF59E0B),
+  'knowledge': Color(0xFF0EA5E9),
+  'reference': Color(0xFF14B8A6),
+  'encyclopedia': Color(0xFF0EA5E9),
+  'search': Color(0xFF0EA5E9),
+  'navigation': Color(0xFF22C55E),
+  'maps': Color(0xFF22C55E),
+  'camera': Color(0xFFF97316),
+  'photo': Color(0xFFF97316),
+  'communication': Color(0xFF3B82F6),
+  'messaging': Color(0xFF3B82F6),
+  'productivity': Color(0xFF8B5CF6),
+  'tasks': Color(0xFF8B5CF6),
+  'calendar': Color(0xFF8B5CF6),
+  'utility': Color(0xFF94A3B8),
+  'tools': Color(0xFF94A3B8),
+  'file': Color(0xFF94A3B8),
+  'files': Color(0xFF94A3B8),
+  'health': Color(0xFFEF4444),
+  'fitness': Color(0xFFEF4444),
+  'weather': Color(0xFF38BDF8),
+  'reading': Color(0xFFF59E0B),
+  'scanner': Color(0xFFF97316),
+  'barcode': Color(0xFFF97316),
+  'recording': Color(0xFFEC4899),
+  'voice': Color(0xFFEC4899),
+};
+
+const List<Color> _fallbackAccents = [
+  Color(0xFFA855F7),
+  Color(0xFF3B82F6),
+  Color(0xFF14B8A6),
+  Color(0xFFF59E0B),
+  Color(0xFF22C55E),
+  Color(0xFFEC4899),
+];
+
+Color _accentFor(String? domain, String sourceId) {
+  if (domain != null) {
+    final key = domain.toLowerCase().trim();
+    final hit = _domainAccents[key];
+    if (hit != null) return hit;
+  }
+  final hash = sourceId.hashCode.abs();
+  return _fallbackAccents[hash % _fallbackAccents.length];
+}
+
+// ----------------------------------------------------------------------------
+
+Future<void> _showDetailsSheet(BuildContext context, AssistantAction action) {
+  return showFSheet<void>(
+    context: context,
+    side: FLayout.btt,
+    // Let the sheet shrink to its content instead of filling a fixed
+    // fraction of the screen. 0.85 is the hard ceiling for very long
+    // descriptions + many examples.
+    mainAxisMaxRatio: 0.85,
+    builder: (sheetContext) => _ActionDetailsSheet(action: action),
+  );
+}
+
+class _ActionDetailsSheet extends StatelessWidget {
+  const _ActionDetailsSheet({required this.action});
 
   final AssistantAction action;
 
@@ -404,83 +606,176 @@ class _ActionDetails extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
+    final accent = _accentFor(action.domain, action.sourceId);
+    final requiredParams = action.parameters
+        .where((p) => p.required)
+        .toList(growable: false);
+    final optionalParams = action.parameters
+        .where((p) => !p.required)
+        .toList(growable: false);
 
-    final examples = action.examples.take(3).toList();
-    final requiredParams =
-        action.parameters.where((p) => p.required).toList(growable: false);
-    final optionalParams =
-        action.parameters.where((p) => !p.required).toList(growable: false);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (action.description.isNotEmpty)
-            Text(
-              action.description,
-              style: typography.sm.copyWith(color: colors.foreground),
+    // Required by forui: the sheet builder must return a widget with an
+    // explicit background colour. We intentionally do NOT set
+    // height: infinity — letting the column shrink-wrap keeps the sheet
+    // tight to its content instead of filling mainAxisMaxRatio.
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: colors.background,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 2),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colors.mutedForeground.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          if (examples.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _SectionLabel('Try saying'),
-            const SizedBox(height: 6),
-            for (final example in examples)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '• “$example”',
-                  style:
-                      typography.sm.copyWith(color: colors.mutedForeground),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header: icon + action title + app name
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        _AppIconTile(
+                          packageName: action.sourceId,
+                          accent: accent,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _humanizeActionId(action.actionId),
+                                style: typography.lg.copyWith(
+                                  color: colors.foreground,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.15,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'in ${action.displayName}',
+                                style: typography.sm.copyWith(
+                                  color: colors.mutedForeground,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (action.description.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        action.description,
+                        style: typography.sm.copyWith(
+                          color: colors.foreground.withValues(alpha: 0.88),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                    if (action.examples.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      _SectionHeading(label: 'Try saying', accent: accent),
+                      const SizedBox(height: 10),
+                      for (final example in action.examples)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                            decoration: BoxDecoration(
+                              color: colors.muted.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border(
+                                left: BorderSide(color: accent, width: 2.5),
+                              ),
+                            ),
+                            child: Text(
+                              '\u201c$example\u201d',
+                              style: typography.sm.copyWith(
+                                color: colors.foreground,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                    if (action.parameters.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      _SectionHeading(label: 'Parameters', accent: accent),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final p in requiredParams)
+                            _ParamChip(parameter: p),
+                          for (final p in optionalParams)
+                            _ParamChip(parameter: p),
+                        ],
+                      ),
+                    ],
+                  ],
                 ),
               ),
-          ],
-          if (action.parameters.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _SectionLabel('Parameters'),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final p in requiredParams) _ParamChip(parameter: p),
-                for (final p in optionalParams) _ParamChip(parameter: p),
-              ],
             ),
           ],
-          const SizedBox(height: 14),
-          _SectionLabel('Result'),
-          const SizedBox(height: 6),
-          Text(
-            _resultHint(action),
-            style: typography.sm.copyWith(color: colors.mutedForeground),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            action.actionId,
-            style: typography.xs.copyWith(
-              color: colors.mutedForeground,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
-
-  String _resultHint(AssistantAction action) {
-    if (action.resultTransportType == 'broadcast') {
-      return 'The app replies with a result — Hark will speak it back.';
-    }
-    final msg = action.confirmationMessage.trim();
-    if (msg.isEmpty) {
-      return 'Fire-and-forget. Hark dispatches the action and moves on.';
-    }
-    return 'Fire-and-forget. Hark will say: “$msg”.';
-  }
 }
 
-// ----------------------------------------------------------------------------
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({required this.label, required this.accent});
+
+  final String label;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final typography = context.theme.typography;
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 12,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: typography.xs.copyWith(
+            color: colors.foreground,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _ParamChip extends StatelessWidget {
   const _ParamChip({required this.parameter});
@@ -493,20 +788,18 @@ class _ParamChip extends StatelessWidget {
     final typography = context.theme.typography;
     final isRequired = parameter.required;
 
-    final bg = isRequired
-        ? colors.primary.withValues(alpha: 0.18)
-        : colors.muted;
-    final border = isRequired
-        ? colors.primary.withValues(alpha: 0.65)
-        : colors.border;
-    final fg = isRequired ? colors.primary : colors.foreground;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: bg,
+        color: isRequired
+            ? colors.primary.withValues(alpha: 0.18)
+            : colors.muted,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
+        border: Border.all(
+          color: isRequired
+              ? colors.primary.withValues(alpha: 0.65)
+              : colors.border,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -514,15 +807,13 @@ class _ParamChip extends StatelessWidget {
           Text(
             parameter.name,
             style: typography.xs.copyWith(
-              color: fg,
+              color: isRequired ? colors.primary : colors.foreground,
               fontWeight: FontWeight.w600,
             ),
           ),
           Text(
             '  ${parameter.type}${isRequired ? ' · required' : ''}',
-            style: typography.xs.copyWith(
-              color: colors.mutedForeground,
-            ),
+            style: typography.xs.copyWith(color: colors.mutedForeground),
           ),
         ],
       ),
@@ -532,95 +823,38 @@ class _ParamChip extends StatelessWidget {
 
 // ----------------------------------------------------------------------------
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-
-  final String text;
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
-    return Text(
-      text.toUpperCase(),
-      style: typography.xs2.copyWith(
-        color: colors.mutedForeground,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.6,
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(FIcons.sparkles, size: 48, color: colors.mutedForeground),
+            const SizedBox(height: 16),
+            Text(
+              'No apps integrated yet.',
+              textAlign: TextAlign.center,
+              style: typography.lg.copyWith(
+                color: colors.foreground,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Install an app that speaks OACP and tap refresh.',
+              textAlign: TextAlign.center,
+              style: typography.sm.copyWith(color: colors.mutedForeground),
+            ),
+          ],
+        ),
       ),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.actionCount,
-    required this.integrationCount,
-  });
-
-  final int actionCount;
-  final int integrationCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final typography = context.theme.typography;
-    final colors = context.theme.colors;
-
-    return Row(
-      children: [
-        _Stat(
-          count: integrationCount,
-          label: integrationCount == 1 ? 'app' : 'apps',
-        ),
-        const SizedBox(width: 12),
-        Container(
-          width: 1,
-          height: 24,
-          color: colors.border,
-        ),
-        const SizedBox(width: 12),
-        _Stat(
-          count: actionCount,
-          label: actionCount == 1 ? 'action' : 'actions',
-        ),
-        const Spacer(),
-        Text(
-          'OACP only',
-          style: typography.xs.copyWith(color: colors.mutedForeground),
-        ),
-      ],
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({required this.count, required this.label});
-
-  final int count;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final typography = context.theme.typography;
-    final colors = context.theme.colors;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Text(
-          '$count',
-          style: typography.xl.copyWith(
-            color: colors.foreground,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: typography.xs.copyWith(color: colors.mutedForeground),
-        ),
-      ],
     );
   }
 }
@@ -640,11 +874,7 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              FIcons.triangleAlert,
-              size: 48,
-              color: colors.destructive,
-            ),
+            Icon(FIcons.triangleAlert, size: 48, color: colors.destructive),
             const SizedBox(height: 16),
             Text(
               'Could not load capabilities.',
@@ -681,8 +911,6 @@ String _humanizeActionId(String actionId) {
   return actionId
       .split(RegExp(r'[_\-]'))
       .where((word) => word.isNotEmpty)
-      .map(
-        (word) => word[0].toUpperCase() + word.substring(1).toLowerCase(),
-      )
+      .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
       .join(' ');
 }

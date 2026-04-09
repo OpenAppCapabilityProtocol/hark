@@ -88,9 +88,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ChatBubble(message: chat.messages[index]),
                   ),
           ),
+          // Show the status line whenever any pipeline state is active —
+          // mic listening, NLU thinking, speaking/executing, or during
+          // initial model load. Previously this was gated on `!init.isReady`
+          // which hid the line exactly when it mattered most (during
+          // _processTranscript after models are loaded).
           if (chat.statusText.isNotEmpty &&
-              chat.messages.isNotEmpty &&
-              !init.isReady)
+              (chat.isThinking ||
+                  chat.isListening ||
+                  !init.isReady ||
+                  chat.isInitializing))
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: Text(
@@ -105,17 +112,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             // Mic stays disabled until the notifier has finished its own
             // init (TTS/STT/MethodChannel) AND the model layer is ready
             // AND no resolution is in flight AND init hasn't errored.
-            isEnabled: init.isReady &&
+            isEnabled:
+                init.isReady &&
                 !chat.isInitializing &&
                 !chat.isThinking &&
                 chat.initError == null,
-            onMicPressed: () =>
-                ref.read(chatProvider.notifier).onMicPressed(),
+            onMicPressed: () => ref.read(chatProvider.notifier).onMicPressed(),
             onSendPressed: (text) =>
                 ref.read(chatProvider.notifier).onTextSubmitted(text),
             onModeToggle: () {
               final current = ref.read(chatProvider).inputMode;
-              ref.read(chatProvider.notifier).setInputMode(
+              ref
+                  .read(chatProvider.notifier)
+                  .setInputMode(
                     current == InputMode.mic
                         ? InputMode.keyboard
                         : InputMode.mic,
@@ -143,18 +152,12 @@ class _InitErrorBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.destructive.withValues(alpha: 0.14),
         border: Border(
-          bottom: BorderSide(
-            color: colors.destructive.withValues(alpha: 0.4),
-          ),
+          bottom: BorderSide(color: colors.destructive.withValues(alpha: 0.4)),
         ),
       ),
       child: Row(
         children: [
-          Icon(
-            FIcons.triangleAlert,
-            size: 16,
-            color: colors.destructive,
-          ),
+          Icon(FIcons.triangleAlert, size: 16, color: colors.destructive),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -181,8 +184,7 @@ class _EmptyState extends StatelessWidget {
 
     final embeddingReady = init.embedding.isReady;
     final slotReady = init.slotFilling.isReady;
-    final showProgress =
-        !embeddingReady || !slotReady || chat.isInitializing;
+    final showProgress = !embeddingReady || !slotReady || chat.isInitializing;
 
     return Center(
       child: Padding(
@@ -268,23 +270,16 @@ class _DefaultAssistantBanner extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
       decoration: BoxDecoration(
         color: colors.muted,
-        border: Border(
-          bottom: BorderSide(color: colors.border),
-        ),
+        border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Row(
         children: [
-          Icon(
-            FIcons.info,
-            size: 14,
-            color: colors.mutedForeground,
-          ),
+          Icon(FIcons.info, size: 14, color: colors.mutedForeground),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Set Hark as your default assistant to use long-press Home.',
-              style:
-                  typography.xs.copyWith(color: colors.mutedForeground),
+              style: typography.xs.copyWith(color: colors.mutedForeground),
             ),
           ),
           const SizedBox(width: 8),
@@ -293,8 +288,7 @@ class _DefaultAssistantBanner extends StatelessWidget {
             variant: FButtonVariant.ghost,
             child: Text(
               'Open settings',
-              style:
-                  typography.xs.copyWith(color: colors.foreground),
+              style: typography.xs.copyWith(color: colors.foreground),
             ),
           ),
         ],
