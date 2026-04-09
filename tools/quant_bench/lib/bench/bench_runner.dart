@@ -39,6 +39,20 @@ class BenchRunner {
   }
 
   Future<List<QuantRunResult>> runAll() async {
+    // Route llama.cpp native logs through the Dart LlamaLogger, then
+    // into our progress stream. Without this the backend registry,
+    // device discovery, and ggml plugin load messages go to native
+    // stderr — which on Android is /dev/null. We specifically need
+    // to see "register_backend: vulkan" / "ggml_vk_instance_init" /
+    // "Vulkan0: <device name>" or their absence to confirm whether
+    // the Mali-G57 is actually being engaged.
+    LlamaEngine.configureLogging(
+      level: LlamaLogLevel.info,
+      handler: (record) {
+        _log('  [llama.cpp] ${record.level.name.toUpperCase()} ${record.message}');
+      },
+    );
+
     _log('Loading gold sets and quant matrix...');
     final embeddingGold = await goldLoader.loadEmbeddingGold();
     final slotFillGold = await goldLoader.loadSlotFillGold();
@@ -119,7 +133,31 @@ class BenchRunner {
     _log('--- ${model.displayName} ${quant.tag} (${quant.tag}) ---');
     _log('  Path: $path (${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB)');
 
+    // Backend selection.
+    //
+    // llamadart's `resolvePreferredBackendForLoad` silently returns
+    // `GpuBackend.cpu` on Android when the caller passes
+    // `GpuBackend.auto` (see llama_cpp_service.dart:207-214). This
+    // means `auto` on a phone is CPU-only, even though the prebuilt
+    // Android bundle ships `libggml-vulkan.so` and the GPU backend
+    // plugin is loadable at runtime (once extractNativeLibs=true is
+    // set in AndroidManifest.xml so ggml's `opendir`-based backend
+    // scanner can find sibling `libggml-*.so` files on disk).
+    //
+    // To actually exercise the Mali/Adreno Vulkan backend we have to
+    // request it explicitly. We try Vulkan first since Mali-G57 on
+    // MTK Dimensity supports Vulkan 1.1 compute shaders natively,
+    // and llama.cpp's Vulkan backend is better-tuned than OpenCL on
+    // modern Android GPUs. If the bench wants to test a specific
+    // backend it can set `HARK_BENCH_BACKEND` in the environment to
+    // `cpu` / `vulkan` / `opencl` to override.
+    final backend = _resolveAndroidBackend();
+    _log('  Backend: ${backend.name}');
+
     final engine = LlamaEngine(LlamaBackend());
+    // Bump native log level before loading the model so we capture
+    // the backend registry init + device enumeration chatter.
+    await engine.setNativeLogLevel(LlamaLogLevel.info);
     EmbeddingMetrics? embedding;
     SlotFillMetrics? slotFill;
     PerfMetrics? perf;
@@ -133,7 +171,7 @@ class BenchRunner {
         path,
         modelParams: ModelParams(
           contextSize: model.contextSize ?? 0,
-          preferredBackend: GpuBackend.auto,
+          preferredBackend: backend,
           numberOfThreads: 0,
           numberOfThreadsBatch: 0,
         ),
@@ -242,6 +280,48 @@ class BenchRunner {
       notes: notes,
       error: error,
     );
+  }
+
+  /// Picks the GPU backend to pass to `ModelParams.preferredBackend`.
+  ///
+  /// Respects `HARK_BENCH_BACKEND` if set (values: `cpu`, `vulkan`,
+  /// `opencl`). Otherwise: on Android, defaults to `cpu`.
+  ///
+  /// Why not default to Vulkan on Android? We tried. On Moto G56 5G
+  /// (MediaTek Dimensity 7025 / Mali-G57 MC2), llama.cpp b8638's
+  /// Vulkan backend:
+  ///   - Loads the plugin cleanly (`libggml-vulkan.so` visible on
+  ///     disk once `extractNativeLibs=true`).
+  ///   - Enumerates the Mali-G57 as `Vulkan0` successfully.
+  ///   - Then fails tensor setup for EmbeddingGemma 300M Q8_0 with
+  ///     a clean error.
+  ///   - Then hard-segfaults (SIGSEGV, null ggml_backend_device* in
+  ///     `llama_model_loader::create_tensor`) when loading Qwen3
+  ///     0.6B Q8_0.
+  ///
+  /// Both failures are upstream llama.cpp Vulkan-backend bugs for
+  /// specific model architectures on Mali, not something the bench
+  /// can fix. Until upstream lands a fix, CPU is the only
+  /// production-safe backend on this device class. `HARK_BENCH_BACKEND`
+  /// stays as an opt-in so we can retest after bumping llamadart's
+  /// pinned llama.cpp tag (currently `b8638`).
+  ///
+  /// On desktop / iOS platforms we pass `auto` and let llamadart
+  /// pick Metal/CPU per the host.
+  GpuBackend _resolveAndroidBackend() {
+    final override = Platform.environment['HARK_BENCH_BACKEND']
+        ?.trim()
+        .toLowerCase();
+    switch (override) {
+      case 'cpu':
+        return GpuBackend.cpu;
+      case 'vulkan':
+        return GpuBackend.vulkan;
+      case 'opencl':
+        return GpuBackend.opencl;
+    }
+    if (Platform.isAndroid) return GpuBackend.cpu;
+    return GpuBackend.auto;
   }
 
   /// Checks each filename candidate in [quant] against the models

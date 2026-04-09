@@ -18,7 +18,35 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:debuggable="true"
-        tools:ignore="HardcodedDebugMode">
+        android:extractNativeLibs="true"
+        tools:ignore="HardcodedDebugMode,ExtractNativeLibs">
+        <!--
+          extractNativeLibs=true is REQUIRED for llamadart on Android.
+
+          llamadart's Android bundle ships libggml.so with
+          GGML_BACKEND_DL=ON, which means optional backends
+          (libggml-vulkan.so, libggml-opencl.so, per-ISA libggml-cpu-*)
+          are loaded at runtime by ggml scanning the directory
+          containing libggml.so for sibling libggml-*.so files via
+          opendir()/readdir().
+
+          With Flutter's default extractNativeLibs=false, all .so files
+          live inside base.apk and the Android linker mmap-dlopen's them
+          from the zip, so lib/arm64/ is empty on disk and ggml's
+          backend scanner finds nothing — every optional backend
+          (including Vulkan offload to the Mali/Adreno GPU) silently
+          falls back to CPU.
+
+          Setting this to true forces the installer to extract the
+          .so files to /data/app/.../lib/arm64/ so ggml can discover
+          the Vulkan/CPU-variant plugins via readdir.
+
+          This makes the APK larger and install slightly slower; both
+          are fine for a dev-only benchmark harness. If we decide
+          llamadart is shipping in hark-release, the same flag is
+          needed there too — or we need a custom bundle with backends
+          statically linked into libggml.so.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
