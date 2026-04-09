@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "description": "Hark llamadart quantization benchmark — embedding gold set. 20 cases across 4 categories: exact_match, paraphrase, disambiguation, cross_app. Built from real OACP manifests in real-examples/ (ArchiveTune, BinaryEye, Fossify Voice Recorder, Libre Camera, Breezy Weather, Wikipedia, Live Darbar).",
+  "created": "2026-04-10",
+  "categories": {
+    "exact_match": "Utterance is (or is very close to) an alias already in the action's manifest. Any reasonable embedder should ace these — they are a sanity check.",
+    "paraphrase": "Utterance is a semantic equivalent using different words. This is the main accuracy test for an embedding model.",
+    "disambiguation": "Utterance is ambiguous between 2+ candidate actions. Top-1 prediction alone is not meaningful; we check that the top-3 contains the candidates. These are the cases most likely to regress when quantization drops.",
+    "cross_app": "Same verb applies to multiple apps (e.g. 'start recording' = voice recorder OR camera). Top-3 must contain both candidates."
+  },
+  "fixtures": {
+    "apps": [
+      {"source": "archivetune", "display": "ArchiveTune", "domain": "music"},
+      {"source": "binaryeye", "display": "BinaryEye", "domain": "scanner"},
+      {"source": "voicerecorder", "display": "Fossify Voice Recorder", "domain": "recording"},
+      {"source": "librecamera", "display": "Libre Camera", "domain": "camera"},
+      {"source": "breezyweather", "display": "Breezy Weather", "domain": "weather"},
+      {"source": "wikipedia", "display": "Wikipedia", "domain": "reference"},
+      {"source": "livedarbar", "display": "Live Darbar", "domain": "audio"}
+    ],
+    "actions": [
+      {"source": "archivetune", "action": "play_music", "aliases": ["play music", "play song", "play track"], "description": "Start music playback in ArchiveTune"},
+      {"source": "archivetune", "action": "pause_music", "aliases": ["pause music", "pause song", "pause playback"], "description": "Pause the currently playing music"},
+      {"source": "archivetune", "action": "next_track", "aliases": ["next track", "next song", "skip song"], "description": "Skip to the next track"},
+      {"source": "archivetune", "action": "previous_track", "aliases": ["previous track", "previous song", "last song"], "description": "Go back to the previous track"},
+      {"source": "archivetune", "action": "toggle_shuffle", "aliases": ["shuffle", "shuffle music", "shuffle songs"], "description": "Toggle shuffle playback mode"},
+      {"source": "archivetune", "action": "toggle_repeat", "aliases": ["repeat", "repeat song", "repeat all"], "description": "Toggle repeat playback mode"},
+      {"source": "archivetune", "action": "toggle_like", "aliases": ["like song", "like this", "unlike song"], "description": "Like or unlike the current track"},
+      {"source": "binaryeye", "action": "scan_barcode", "aliases": ["scan a QR code", "scan a barcode", "read a code"], "description": "Open the camera scanner to read a barcode or QR code"},
+      {"source": "binaryeye", "action": "scan_from_image", "aliases": ["scan from image", "scan from photo", "read code from picture"], "description": "Scan a barcode or QR code from an existing image"},
+      {"source": "binaryeye", "action": "create_barcode", "aliases": ["generate a QR code", "make a barcode", "create a code"], "description": "Generate a new barcode or QR code from text content"},
+      {"source": "voicerecorder", "action": "start_recording", "aliases": ["start recording", "begin recording", "record audio"], "description": "Start recording audio with Fossify Voice Recorder"},
+      {"source": "voicerecorder", "action": "pause_recording", "aliases": ["pause recording", "pause recorder", "hold recording"], "description": "Pause the current audio recording"},
+      {"source": "voicerecorder", "action": "resume_recording", "aliases": ["resume recording", "continue recording", "unpause recording"], "description": "Resume a paused audio recording"},
+      {"source": "voicerecorder", "action": "stop_recording", "aliases": ["stop recording", "finish recording", "save recording"], "description": "Stop and save the current audio recording"},
+      {"source": "voicerecorder", "action": "discard_recording", "aliases": ["discard recording", "delete current recording", "cancel recording"], "description": "Discard the current recording without saving"},
+      {"source": "librecamera", "action": "take_photo_rear_camera", "aliases": ["take a photo", "take a picture", "take photo"], "description": "Take a photo with the rear camera"},
+      {"source": "librecamera", "action": "take_photo_front_camera", "aliases": ["take a selfie", "selfie", "snap a selfie"], "description": "Take a selfie with the front camera"},
+      {"source": "librecamera", "action": "start_video_recording_rear_camera", "aliases": ["record a video", "start recording video", "start video recording"], "description": "Record a video with the rear camera"},
+      {"source": "librecamera", "action": "start_video_recording_front_camera", "aliases": ["record a selfie video", "selfie video", "front camera video"], "description": "Record a selfie video with the front camera"},
+      {"source": "breezyweather", "action": "check_weather", "aliases": ["check weather", "current weather", "weather now"], "description": "Show the current weather conditions"},
+      {"source": "breezyweather", "action": "check_forecast", "aliases": ["weather forecast", "forecast", "tomorrow's weather"], "description": "Show the weather forecast for the coming days"},
+      {"source": "breezyweather", "action": "open_weather", "aliases": ["open weather app", "show weather", "open breezy weather"], "description": "Launch the Breezy Weather app"},
+      {"source": "wikipedia", "action": "search_articles", "aliases": ["search Wikipedia", "look up on Wikipedia", "find on Wikipedia"], "description": "Search Wikipedia for a topic or phrase"},
+      {"source": "wikipedia", "action": "open_article", "aliases": ["open Wikipedia article", "read on Wikipedia"], "description": "Open a specific Wikipedia article by title"},
+      {"source": "wikipedia", "action": "open_random_article", "aliases": ["random Wikipedia article", "surprise me on Wikipedia"], "description": "Open a random Wikipedia article"},
+      {"source": "livedarbar", "action": "play_live_kirtan", "aliases": ["play live kirtan", "start kirtan", "live kirtan"], "description": "Play the live kirtan stream"},
+      {"source": "livedarbar", "action": "play_mukhwak", "aliases": ["play mukhwak", "start mukhwak", "play hukumnama"], "description": "Play today's mukhwak"},
+      {"source": "livedarbar", "action": "play_katha", "aliases": ["play katha", "start katha", "mukhwak katha"], "description": "Play the katha audio"},
+      {"source": "livedarbar", "action": "view_mukhwak_pdf", "aliases": ["view mukhwak", "show mukhwak", "read mukhwak"], "description": "View the mukhwak text as a PDF"}
+    ]
+  },
+  "cases": [
+    {
+      "id": "em01",
+      "category": "exact_match",
+      "utterance": "pause the music",
+      "expected_top1": {"source": "archivetune", "action": "pause_music"}
+    },
+    {
+      "id": "em02",
+      "category": "exact_match",
+      "utterance": "scan a QR code",
+      "expected_top1": {"source": "binaryeye", "action": "scan_barcode"}
+    },
+    {
+      "id": "em03",
+      "category": "exact_match",
+      "utterance": "take a photo",
+      "expected_top1": {"source": "librecamera", "action": "take_photo_rear_camera"}
+    },
+    {
+      "id": "em04",
+      "category": "exact_match",
+      "utterance": "check the current weather",
+      "expected_top1": {"source": "breezyweather", "action": "check_weather"}
+    },
+    {
+      "id": "em05",
+      "category": "exact_match",
+      "utterance": "search Wikipedia for black holes",
+      "expected_top1": {"source": "wikipedia", "action": "search_articles"}
+    },
+    {
+      "id": "pa01",
+      "category": "paraphrase",
+      "utterance": "shuffle my songs",
+      "expected_top1": {"source": "archivetune", "action": "toggle_shuffle"}
+    },
+    {
+      "id": "pa02",
+      "category": "paraphrase",
+      "utterance": "read this barcode for me",
+      "expected_top1": {"source": "binaryeye", "action": "scan_barcode"}
+    },
+    {
+      "id": "pa03",
+      "category": "paraphrase",
+      "utterance": "finish the recording and save it",
+      "expected_top1": {"source": "voicerecorder", "action": "stop_recording"}
+    },
+    {
+      "id": "pa04",
+      "category": "paraphrase",
+      "utterance": "snap a selfie with the front camera",
+      "expected_top1": {"source": "librecamera", "action": "take_photo_front_camera"}
+    },
+    {
+      "id": "pa05",
+      "category": "paraphrase",
+      "utterance": "what's the forecast for tomorrow",
+      "expected_top1": {"source": "breezyweather", "action": "check_forecast"}
+    },
+    {
+      "id": "di01",
+      "category": "disambiguation",
+      "utterance": "next",
+      "expected_in_top3": [
+        {"source": "archivetune", "action": "next_track"}
+      ],
+      "notes": "Short utterance — should unambiguously rank the music 'next track' on top for ArchiveTune, because no other app has a 'next' action."
+    },
+    {
+      "id": "di02",
+      "category": "disambiguation",
+      "utterance": "pause",
+      "expected_in_top3": [
+        {"source": "archivetune", "action": "pause_music"},
+        {"source": "voicerecorder", "action": "pause_recording"}
+      ],
+      "notes": "Ambiguous — both music pause and recording pause should be in top 3."
+    },
+    {
+      "id": "di03",
+      "category": "disambiguation",
+      "utterance": "resume",
+      "expected_in_top3": [
+        {"source": "voicerecorder", "action": "resume_recording"},
+        {"source": "archivetune", "action": "play_music"}
+      ],
+      "notes": "'Resume' is explicit in voice recorder, implicit in music playback (resume = play)."
+    },
+    {
+      "id": "di04",
+      "category": "disambiguation",
+      "utterance": "stop",
+      "expected_in_top3": [
+        {"source": "voicerecorder", "action": "stop_recording"},
+        {"source": "archivetune", "action": "pause_music"}
+      ],
+      "notes": "'Stop' most cleanly matches stop_recording. Pause_music is the music-world equivalent."
+    },
+    {
+      "id": "di05",
+      "category": "disambiguation",
+      "utterance": "cancel",
+      "expected_in_top3": [
+        {"source": "voicerecorder", "action": "discard_recording"}
+      ],
+      "notes": "Only Voice Recorder has a 'cancel / discard' action. Should unambiguously rank it top 1."
+    },
+    {
+      "id": "cr01",
+      "category": "cross_app",
+      "utterance": "start recording",
+      "expected_in_top3": [
+        {"source": "voicerecorder", "action": "start_recording"},
+        {"source": "librecamera", "action": "start_video_recording_rear_camera"}
+      ],
+      "notes": "Could be audio (Voice Recorder) or video (Libre Camera). Both should be in top 3."
+    },
+    {
+      "id": "cr02",
+      "category": "cross_app",
+      "utterance": "record a video of myself",
+      "expected_top1": {"source": "librecamera", "action": "start_video_recording_front_camera"}
+    },
+    {
+      "id": "cr03",
+      "category": "cross_app",
+      "utterance": "play live kirtan on Live Darbar",
+      "expected_top1": {"source": "livedarbar", "action": "play_live_kirtan"}
+    },
+    {
+      "id": "cr04",
+      "category": "cross_app",
+      "utterance": "create a QR code for example dot com",
+      "expected_top1": {"source": "binaryeye", "action": "create_barcode"}
+    },
+    {
+      "id": "cr05",
+      "category": "cross_app",
+      "utterance": "look up einstein on Wikipedia",
+      "expected_top1": {"source": "wikipedia", "action": "search_articles"}
+    }
+  ]
+}
