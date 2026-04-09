@@ -7,12 +7,13 @@ import '../models/assistant_action.dart';
 import '../state/app_icon_provider.dart';
 import '../state/registry_provider.dart';
 
-/// "What you can say" — a swipeable deck of example utterances, one card per
-/// (action, example) pair, backed by `capabilityRegistryProvider`.
+/// "What you can say" — a grouped scrollable list of OACP capabilities.
 ///
-/// This screen is intentionally NOT a schema browser. It's a discovery
-/// surface: one card = one thing the user can say to Hark. Swipe to browse,
-/// tap for details (parameters, alt examples, full description).
+/// Apps are section headers; actions are rows inside each section. Each
+/// row's primary label is the first example utterance ("play next song"),
+/// with the humanized action id ("Next Song") as the secondary hint. Tap a
+/// row to open a bottom sheet with the full description, alt examples, and
+/// parameter chips.
 class AvailableActionsScreen extends ConsumerStatefulWidget {
   const AvailableActionsScreen({super.key});
 
@@ -23,12 +24,12 @@ class AvailableActionsScreen extends ConsumerStatefulWidget {
 
 class _AvailableActionsScreenState
     extends ConsumerState<AvailableActionsScreen> {
-  final PageController _pageController = PageController(viewportFraction: 0.88);
-  int _currentIndex = 0;
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void dispose() {
-    _pageController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -59,7 +60,8 @@ class _AvailableActionsScreenState
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: FCircularProgress(size: FCircularProgressSizeVariant.sm),
+                    child: FCircularProgress(
+                        size: FCircularProgressSizeVariant.sm),
                   )
                 : const Icon(FIcons.refreshCw),
           ),
@@ -68,21 +70,113 @@ class _AvailableActionsScreenState
       child: registryAsync.when(
         skipLoadingOnRefresh: true,
         skipLoadingOnReload: true,
-        data: (registry) {
-          final cards = _buildCards(registry.actions);
-          if (cards.isEmpty) return const _EmptyState();
-          return _UtteranceDeck(
-            cards: cards,
-            pageController: _pageController,
-            currentIndex: _currentIndex,
-            onPageChanged: (index) => setState(() => _currentIndex = index),
-            totalActions: _uniqueActionCount(registry.actions),
-            totalApps: _uniqueAppCount(registry.actions),
-          );
-        },
+        data: (registry) => _ActionsBody(
+          actions: registry.actions,
+          searchController: _searchController,
+          query: _query,
+          onQueryChanged: (value) {
+            setState(() {
+              _query = value.trim().toLowerCase();
+            });
+          },
+        ),
         loading: () => const Center(child: FCircularProgress()),
         error: (error, _) => _ErrorState(message: error.toString()),
       ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+
+class _ActionsBody extends StatelessWidget {
+  const _ActionsBody({
+    required this.actions,
+    required this.searchController,
+    required this.query,
+    required this.onQueryChanged,
+  });
+
+  final List<AssistantAction> actions;
+  final TextEditingController searchController;
+  final String query;
+  final ValueChanged<String> onQueryChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final typography = context.theme.typography;
+
+    if (actions.isEmpty) {
+      return const _EmptyState();
+    }
+
+    final groups = _groupByApp(actions, query);
+    final totalActions = actions
+        .where((a) => a.sourceType == AssistantActionSourceType.oacp)
+        .length;
+    final totalApps = _uniqueAppCount(actions);
+
+    // Header (search + summary) + per-app sections in a single lazy list.
+    const headerItemCount = 1;
+    final groupCount = groups.isEmpty ? 1 : groups.length;
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      itemCount: headerItemCount + groupCount,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FTextField(
+                  control: FTextFieldControl.managed(
+                    controller: searchController,
+                    onChange: (value) => onQueryChanged(value.text),
+                  ),
+                  hint: 'Search apps and actions',
+                  prefixBuilder: (context, style, variants) => Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                        start: 10, end: 8),
+                    child: Icon(FIcons.search,
+                        size: 18, color: colors.mutedForeground),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Text(
+                    '$totalActions things · $totalApps apps',
+                    style: typography.xs.copyWith(
+                      color: colors.mutedForeground,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        if (groups.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 48),
+            child: Center(
+              child: Text(
+                'No matches for "${searchController.text}".',
+                style:
+                    typography.sm.copyWith(color: colors.mutedForeground),
+              ),
+            ),
+          );
+        }
+        final group = groups[index - headerItemCount];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _AppSection(group: group),
+        );
+      },
     );
   }
 
@@ -96,252 +190,232 @@ class _AvailableActionsScreenState
     return ids.length;
   }
 
-  int _uniqueActionCount(List<AssistantAction> actions) {
-    return actions
-        .where((a) => a.sourceType == AssistantActionSourceType.oacp)
-        .length;
-  }
-
-  /// Flatten actions into a deck where each (action, example) pair is one
-  /// card. Actions with no examples contribute a single card whose utterance
-  /// is derived from the humanized action id. Sorted alphabetically by app
-  /// name, then by the original example order within the action — stable so
-  /// the deck doesn't reshuffle on rebuild.
-  List<_UtteranceCard> _buildCards(List<AssistantAction> actions) {
-    final oacp = actions
-        .where((a) => a.sourceType == AssistantActionSourceType.oacp)
-        .toList()
-      ..sort((a, b) {
-        final byApp = a.displayName.compareTo(b.displayName);
-        if (byApp != 0) return byApp;
-        return a.actionId.compareTo(b.actionId);
-      });
-
-    final cards = <_UtteranceCard>[];
-    for (final action in oacp) {
-      if (action.examples.isEmpty) {
-        cards.add(_UtteranceCard(
-          action: action,
-          utterance: _humanizeActionId(action.actionId),
-          exampleIndex: 0,
-          exampleCount: 1,
-        ));
-      } else {
-        for (var i = 0; i < action.examples.length; i++) {
-          cards.add(_UtteranceCard(
-            action: action,
-            utterance: action.examples[i],
-            exampleIndex: i,
-            exampleCount: action.examples.length,
-          ));
-        }
-      }
+  List<_AppGroup> _groupByApp(List<AssistantAction> actions, String query) {
+    final grouped = <String, List<AssistantAction>>{};
+    for (final action in actions) {
+      if (action.sourceType != AssistantActionSourceType.oacp) continue;
+      if (!_matchesQuery(action, query)) continue;
+      grouped.putIfAbsent(action.sourceId, () => []).add(action);
     }
-    return cards;
+
+    final groups = grouped.entries.map((entry) {
+      final sorted = [...entry.value]
+        ..sort((a, b) => a.actionId.compareTo(b.actionId));
+      return _AppGroup(
+        sourceId: entry.key,
+        appName: sorted.first.displayName,
+        domain: sorted.first.domain,
+        actions: sorted,
+      );
+    }).toList(growable: false);
+
+    groups.sort((a, b) => a.appName.compareTo(b.appName));
+    return groups;
+  }
+
+  bool _matchesQuery(AssistantAction action, String query) {
+    if (query.isEmpty) return true;
+    final haystack = [
+      action.displayName,
+      action.sourceId,
+      action.actionId,
+      action.description,
+      ...action.examples,
+      ...action.parameters.map((p) => p.name),
+    ].join(' ').toLowerCase();
+    return haystack.contains(query);
   }
 }
 
 // ----------------------------------------------------------------------------
 
-class _UtteranceCard {
-  const _UtteranceCard({
-    required this.action,
-    required this.utterance,
-    required this.exampleIndex,
-    required this.exampleCount,
+class _AppGroup {
+  const _AppGroup({
+    required this.sourceId,
+    required this.appName,
+    required this.domain,
+    required this.actions,
   });
 
-  final AssistantAction action;
-  final String utterance;
-  final int exampleIndex;
-  final int exampleCount;
+  final String sourceId;
+  final String appName;
+  final String? domain;
+  final List<AssistantAction> actions;
 }
 
-// ----------------------------------------------------------------------------
+/// One card per app. Header = icon + name + count. Body = action rows.
+/// Each action row is one [_ActionRow] showing the primary example
+/// utterance as the main label and the humanized action id as the hint.
+class _AppSection extends StatelessWidget {
+  const _AppSection({required this.group});
 
-class _UtteranceDeck extends StatelessWidget {
-  const _UtteranceDeck({
-    required this.cards,
-    required this.pageController,
-    required this.currentIndex,
-    required this.onPageChanged,
-    required this.totalActions,
-    required this.totalApps,
-  });
-
-  final List<_UtteranceCard> cards;
-  final PageController pageController;
-  final int currentIndex;
-  final ValueChanged<int> onPageChanged;
-  final int totalActions;
-  final int totalApps;
+  final _AppGroup group;
 
   @override
   Widget build(BuildContext context) {
-    final typography = context.theme.typography;
     final colors = context.theme.colors;
+    final typography = context.theme.typography;
+    final accent = _accentFor(group.domain, group.sourceId);
+    final count = group.actions.length;
 
-    return Column(
-      children: [
-        Expanded(
-          child: PageView.builder(
-            controller: pageController,
-            itemCount: cards.length,
-            onPageChanged: onPageChanged,
-            itemBuilder: (context, index) {
-              final card = cards[index];
-              final isActive = index == currentIndex;
-              return _UtteranceCardView(card: card, isActive: isActive);
-            },
-          ),
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.muted.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colors.border.withValues(alpha: 0.6),
+          width: 1,
         ),
-        const SizedBox(height: 12),
-        _PageCounter(
-          current: currentIndex + 1,
-          total: cards.length,
-        ),
-        const SizedBox(height: 6),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 20),
-          child: Text(
-            '$totalActions things · $totalApps apps',
-            style: typography.xs.copyWith(
-              color: colors.mutedForeground,
-              letterSpacing: 0.3,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Section header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _AppIconTile(packageName: group.sourceId, accent: accent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    group.appName,
+                    style: typography.md.copyWith(
+                      color: colors.foreground,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: accent.withValues(alpha: 0.45),
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: typography.xs.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-      ],
+          Container(
+            height: 1,
+            margin: const EdgeInsets.symmetric(horizontal: 14),
+            color: colors.border.withValues(alpha: 0.5),
+          ),
+          // Action rows
+          for (var i = 0; i < group.actions.length; i++) ...[
+            _ActionRow(
+              action: group.actions[i],
+              accent: accent,
+              onTap: () => _showDetailsSheet(context, group.actions[i]),
+            ),
+            if (i != group.actions.length - 1)
+              Container(
+                height: 1,
+                margin: const EdgeInsets.only(left: 14, right: 14),
+                color: colors.border.withValues(alpha: 0.25),
+              ),
+          ],
+        ],
+      ),
     );
   }
 }
 
 // ----------------------------------------------------------------------------
 
-class _UtteranceCardView extends StatelessWidget {
-  const _UtteranceCardView({required this.card, required this.isActive});
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
+    required this.action,
+    required this.accent,
+    required this.onTap,
+  });
 
-  final _UtteranceCard card;
-  final bool isActive;
+  final AssistantAction action;
+  final Color accent;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.theme.colors;
     final typography = context.theme.typography;
-    final gradient = _gradientFor(card.action.domain, card.action.sourceId);
 
-    return AnimatedScale(
-      scale: isActive ? 1.0 : 0.94,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
+    final primary = action.examples.isNotEmpty
+        ? '\u201c${action.examples.first}\u201d'
+        : _humanizeActionId(action.actionId);
+    final secondary = action.examples.isNotEmpty
+        ? _humanizeActionId(action.actionId)
+        : action.description;
+    final secondaryTrimmed = secondary.trim();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => _showDetailsSheet(context, card),
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: gradient,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+        padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.only(top: 6, right: 12),
+              decoration: BoxDecoration(
+                color: accent,
+                shape: BoxShape.circle,
               ),
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: [
-                BoxShadow(
-                  color: gradient.first.withValues(alpha: 0.35),
-                  blurRadius: 28,
-                  offset: const Offset(0, 14),
-                ),
-              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+            Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      _AppIconLarge(packageName: card.action.sourceId),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              card.action.displayName,
-                              style: typography.md.copyWith(
-                                color: _onGradient.withValues(alpha: 0.95),
-                                fontWeight: FontWeight.w700,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (card.action.domain != null &&
-                                card.action.domain!.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  card.action.domain!.toLowerCase(),
-                                  style: typography.xs.copyWith(
-                                    color: _onGradient.withValues(alpha: 0.7),
-                                    letterSpacing: 0.4,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Text(
-                            '\u201c${card.utterance}\u201d',
-                            textAlign: TextAlign.center,
-                            style: typography.xl2.copyWith(
-                              color: _onGradient,
-                              fontWeight: FontWeight.w700,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
-                      ),
+                  Text(
+                    primary,
+                    style: typography.sm.copyWith(
+                      color: colors.foreground,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  Container(
-                    height: 1,
-                    color: _onGradient.withValues(alpha: 0.18),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        FIcons.chevronUp,
-                        size: 14,
-                        color: _onGradient.withValues(alpha: 0.7),
+                  if (secondaryTrimmed.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      secondaryTrimmed,
+                      style: typography.xs.copyWith(
+                        color: colors.mutedForeground,
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'tap for details',
-                        style: typography.xs.copyWith(
-                          color: _onGradient.withValues(alpha: 0.7),
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
-                  ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Icon(
+              FIcons.chevronRight,
+              size: 16,
+              color: colors.mutedForeground.withValues(alpha: 0.7),
+            ),
+          ],
         ),
       ),
     );
@@ -350,119 +424,50 @@ class _UtteranceCardView extends StatelessWidget {
 
 // ----------------------------------------------------------------------------
 
-/// Solid white foreground used on every gradient card. All gradient pairs in
-/// [_domainGradients] are chosen so white text at ≥0.7 alpha remains legible.
-const Color _onGradient = Color(0xFFFFFFFF);
-
-/// Hand-tuned gradient pairs per OACP `domain`. Falls back to
-/// [_fallbackGradients] indexed by a hash of the source package name so
-/// unknown domains still get a stable, distinct colour per app.
-const Map<String, List<Color>> _domainGradients = {
-  'music':         [Color(0xFF7C3AED), Color(0xFFEC4899)],
-  'audio':         [Color(0xFF7C3AED), Color(0xFFEC4899)],
-  'media':         [Color(0xFFD97706), Color(0xFFF59E0B)],
-  'knowledge':     [Color(0xFF2563EB), Color(0xFF06B6D4)],
-  'reference':     [Color(0xFF0891B2), Color(0xFF14B8A6)],
-  'encyclopedia':  [Color(0xFF2563EB), Color(0xFF06B6D4)],
-  'search':        [Color(0xFF2563EB), Color(0xFF06B6D4)],
-  'navigation':    [Color(0xFF059669), Color(0xFF84CC16)],
-  'maps':          [Color(0xFF059669), Color(0xFF84CC16)],
-  'camera':        [Color(0xFFF97316), Color(0xFFEF4444)],
-  'photo':         [Color(0xFFF97316), Color(0xFFEF4444)],
-  'communication': [Color(0xFF10B981), Color(0xFF3B82F6)],
-  'messaging':     [Color(0xFF10B981), Color(0xFF3B82F6)],
-  'productivity':  [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-  'tasks':         [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-  'calendar':      [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-  'utility':       [Color(0xFF64748B), Color(0xFF334155)],
-  'tools':         [Color(0xFF64748B), Color(0xFF334155)],
-  'file':          [Color(0xFF64748B), Color(0xFF334155)],
-  'files':         [Color(0xFF64748B), Color(0xFF334155)],
-  'health':        [Color(0xFFE11D48), Color(0xFFBE185D)],
-  'fitness':       [Color(0xFFE11D48), Color(0xFFBE185D)],
-  'weather':       [Color(0xFF0EA5E9), Color(0xFF6366F1)],
-  'reading':       [Color(0xFF92400E), Color(0xFFF59E0B)],
-  'scanner':       [Color(0xFFF97316), Color(0xFFEF4444)],
-  'barcode':       [Color(0xFFF97316), Color(0xFFEF4444)],
-  'recording':     [Color(0xFFDB2777), Color(0xFF9333EA)],
-  'voice':         [Color(0xFFDB2777), Color(0xFF9333EA)],
-};
-
-const List<List<Color>> _fallbackGradients = [
-  [Color(0xFF8B5CF6), Color(0xFFEC4899)],
-  [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-  [Color(0xFF14B8A6), Color(0xFF3B82F6)],
-  [Color(0xFFF59E0B), Color(0xFFEF4444)],
-  [Color(0xFF22C55E), Color(0xFF14B8A6)],
-  [Color(0xFFEC4899) ,Color(0xFFF97316)],
-];
-
-List<Color> _gradientFor(String? domain, String sourceId) {
-  if (domain != null) {
-    final key = domain.toLowerCase().trim();
-    final hit = _domainGradients[key];
-    if (hit != null) return hit;
-  }
-  final hash = sourceId.hashCode.abs();
-  return _fallbackGradients[hash % _fallbackGradients.length];
-}
-
-// ----------------------------------------------------------------------------
-
-class _AppIconLarge extends ConsumerWidget {
-  const _AppIconLarge({required this.packageName});
+class _AppIconTile extends ConsumerWidget {
+  const _AppIconTile({required this.packageName, required this.accent});
 
   final String packageName;
+  final Color accent;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final info = ref.watch(appInfoProvider(packageName));
-    const double size = 52;
-    const radius = BorderRadius.all(Radius.circular(14));
+    final colors = context.theme.colors;
+    const double size = 40;
+    final radius = BorderRadius.circular(11);
 
     return Container(
       decoration: BoxDecoration(
         borderRadius: radius,
-        color: _onGradient.withValues(alpha: 0.14),
         border: Border.all(
-          color: _onGradient.withValues(alpha: 0.25),
-          width: 1,
+          color: accent.withValues(alpha: 0.55),
+          width: 1.2,
         ),
       ),
+      padding: const EdgeInsets.all(1.5),
       child: ClipRRect(
-        borderRadius: radius,
+        borderRadius: BorderRadius.circular(9.5),
         child: SizedBox.square(
           dimension: size,
           child: info.when(
             data: (appInfo) {
               final iconBytes = appInfo?.icon;
               if (iconBytes == null || iconBytes.isEmpty) {
-                return const Icon(
-                  FIcons.package,
-                  size: 22,
-                  color: _onGradient,
-                );
+                return _IconFallback(color: accent);
               }
               return Image.memory(
                 iconBytes,
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.medium,
                 gaplessPlayback: true,
-                cacheWidth: 120,
-                cacheHeight: 120,
-                errorBuilder: (_, _, _) => const Icon(
-                  FIcons.package,
-                  size: 22,
-                  color: _onGradient,
-                ),
+                cacheWidth: 96,
+                cacheHeight: 96,
+                errorBuilder: (_, _, _) => _IconFallback(color: accent),
               );
             },
-            loading: () => const SizedBox(),
-            error: (_, _) => const Icon(
-              FIcons.package,
-              size: 22,
-              color: _onGradient,
-            ),
+            loading: () => ColoredBox(color: colors.muted),
+            error: (_, _) => _IconFallback(color: accent),
           ),
         ),
       ),
@@ -470,71 +475,98 @@ class _AppIconLarge extends ConsumerWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
+class _IconFallback extends StatelessWidget {
+  const _IconFallback({required this.color});
 
-class _PageCounter extends StatelessWidget {
-  const _PageCounter({required this.current, required this.total});
-
-  final int current;
-  final int total;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final typography = context.theme.typography;
     final colors = context.theme.colors;
-
-    // Dots for small decks, "n / total" text for bigger ones.
-    if (total <= 10) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (var i = 0; i < total; i++)
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: i == current - 1 ? 20 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: i == current - 1
-                    ? colors.primary
-                    : colors.mutedForeground.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-        ],
-      );
-    }
-    return Text(
-      '$current / $total',
-      style: typography.xs.copyWith(
-        color: colors.mutedForeground,
-        fontFeatures: const [FontFeature.tabularFigures()],
-      ),
+    return ColoredBox(
+      color: colors.muted,
+      child: Icon(FIcons.package, size: 20, color: color),
     );
   }
 }
 
 // ----------------------------------------------------------------------------
 
-Future<void> _showDetailsSheet(BuildContext context, _UtteranceCard card) {
+/// Hand-tuned accent per OACP `domain`. Used for the app-icon border, the
+/// action-row bullet, and the action-count pill. The same palette the
+/// earlier swipe-deck variant used for its gradients, but applied as a
+/// single solid accent colour per app instead of a full-screen gradient.
+const Map<String, Color> _domainAccents = {
+  'music':         Color(0xFFA855F7),
+  'audio':         Color(0xFFA855F7),
+  'media':         Color(0xFFF59E0B),
+  'knowledge':     Color(0xFF0EA5E9),
+  'reference':     Color(0xFF14B8A6),
+  'encyclopedia':  Color(0xFF0EA5E9),
+  'search':        Color(0xFF0EA5E9),
+  'navigation':    Color(0xFF22C55E),
+  'maps':          Color(0xFF22C55E),
+  'camera':        Color(0xFFF97316),
+  'photo':         Color(0xFFF97316),
+  'communication': Color(0xFF3B82F6),
+  'messaging':     Color(0xFF3B82F6),
+  'productivity':  Color(0xFF8B5CF6),
+  'tasks':         Color(0xFF8B5CF6),
+  'calendar':      Color(0xFF8B5CF6),
+  'utility':       Color(0xFF94A3B8),
+  'tools':         Color(0xFF94A3B8),
+  'file':          Color(0xFF94A3B8),
+  'files':         Color(0xFF94A3B8),
+  'health':        Color(0xFFEF4444),
+  'fitness':       Color(0xFFEF4444),
+  'weather':       Color(0xFF38BDF8),
+  'reading':       Color(0xFFF59E0B),
+  'scanner':       Color(0xFFF97316),
+  'barcode':       Color(0xFFF97316),
+  'recording':     Color(0xFFEC4899),
+  'voice':         Color(0xFFEC4899),
+};
+
+const List<Color> _fallbackAccents = [
+  Color(0xFFA855F7),
+  Color(0xFF3B82F6),
+  Color(0xFF14B8A6),
+  Color(0xFFF59E0B),
+  Color(0xFF22C55E),
+  Color(0xFFEC4899),
+];
+
+Color _accentFor(String? domain, String sourceId) {
+  if (domain != null) {
+    final key = domain.toLowerCase().trim();
+    final hit = _domainAccents[key];
+    if (hit != null) return hit;
+  }
+  final hash = sourceId.hashCode.abs();
+  return _fallbackAccents[hash % _fallbackAccents.length];
+}
+
+// ----------------------------------------------------------------------------
+
+Future<void> _showDetailsSheet(BuildContext context, AssistantAction action) {
   return showFSheet<void>(
     context: context,
     side: FLayout.btt,
     mainAxisMaxRatio: 0.75,
-    builder: (sheetContext) => _ActionDetailsSheet(card: card),
+    builder: (sheetContext) => _ActionDetailsSheet(action: action),
   );
 }
 
 class _ActionDetailsSheet extends StatelessWidget {
-  const _ActionDetailsSheet({required this.card});
+  const _ActionDetailsSheet({required this.action});
 
-  final _UtteranceCard card;
+  final AssistantAction action;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final typography = context.theme.typography;
-    final action = card.action;
+    final accent = _accentFor(action.domain, action.sourceId);
     final requiredParams =
         action.parameters.where((p) => p.required).toList(growable: false);
     final optionalParams =
@@ -562,7 +594,10 @@ class _ActionDetailsSheet extends StatelessWidget {
               const SizedBox(height: 20),
               Row(
                 children: [
-                  _SheetAppIcon(packageName: action.sourceId),
+                  _AppIconTile(
+                    packageName: action.sourceId,
+                    accent: accent,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -594,27 +629,26 @@ class _ActionDetailsSheet extends StatelessWidget {
                   style: typography.sm.copyWith(color: colors.foreground),
                 ),
               ],
-              if (action.examples.length > 1) ...[
+              if (action.examples.isNotEmpty) ...[
                 const SizedBox(height: 20),
                 Text(
-                  'Also try',
+                  'Try saying',
                   style: typography.xs.copyWith(
                     color: colors.mutedForeground,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (var i = 0; i < action.examples.length; i++)
-                  if (i != card.exampleIndex)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '\u201c${action.examples[i]}\u201d',
-                        style: typography.sm.copyWith(
-                          color: colors.mutedForeground,
-                        ),
+                for (final example in action.examples)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '\u201c$example\u201d',
+                      style: typography.sm.copyWith(
+                        color: colors.foreground.withValues(alpha: 0.85),
                       ),
                     ),
+                  ),
               ],
               if (action.parameters.isNotEmpty) ...[
                 const SizedBox(height: 20),
@@ -636,58 +670,6 @@ class _ActionDetailsSheet extends StatelessWidget {
                 ),
               ],
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SheetAppIcon extends ConsumerWidget {
-  const _SheetAppIcon({required this.packageName});
-
-  final String packageName;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final info = ref.watch(appInfoProvider(packageName));
-    final colors = context.theme.colors;
-    const double size = 40;
-    const radius = BorderRadius.all(Radius.circular(10));
-
-    return ClipRRect(
-      borderRadius: radius,
-      child: SizedBox.square(
-        dimension: size,
-        child: info.when(
-          data: (appInfo) {
-            final iconBytes = appInfo?.icon;
-            if (iconBytes == null || iconBytes.isEmpty) {
-              return ColoredBox(
-                color: colors.muted,
-                child: Icon(FIcons.package,
-                    size: 18, color: colors.mutedForeground),
-              );
-            }
-            return Image.memory(
-              iconBytes,
-              fit: BoxFit.cover,
-              filterQuality: FilterQuality.medium,
-              gaplessPlayback: true,
-              cacheWidth: 96,
-              cacheHeight: 96,
-              errorBuilder: (_, _, _) => ColoredBox(
-                color: colors.muted,
-                child: Icon(FIcons.package,
-                    size: 18, color: colors.mutedForeground),
-              ),
-            );
-          },
-          loading: () => ColoredBox(color: colors.muted),
-          error: (_, _) => ColoredBox(
-            color: colors.muted,
-            child: Icon(FIcons.package,
-                size: 18, color: colors.mutedForeground),
           ),
         ),
       ),
