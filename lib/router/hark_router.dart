@@ -26,15 +26,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
   final refresh = _RouterRefreshListenable();
   ref.onDispose(refresh.dispose);
 
-  ref.listen<InitState>(
-    initProvider,
-    (previous, next) {
-      final wasReady = previous?.isReady ?? false;
-      if (wasReady != next.isReady) {
-        refresh.notify();
-      }
-    },
-  );
+  ref.listen<InitState>(initProvider, (previous, next) {
+    final wasProceedable = previous?.canProceed ?? false;
+    if (wasProceedable != next.canProceed) {
+      refresh.notify();
+    }
+  });
 
   return GoRouter(
     initialLocation: HarkRoutes.splash,
@@ -44,10 +41,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final init = ref.read(initProvider);
       final atSplash = state.matchedLocation == HarkRoutes.splash;
 
-      if (atSplash && init.isReady) {
+      if (atSplash && init.canProceed) {
         return HarkRoutes.chat;
       }
-      if (!atSplash && !init.isReady) {
+      if (!atSplash && !init.canProceed) {
         return HarkRoutes.splash;
       }
       return null;

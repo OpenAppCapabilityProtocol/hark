@@ -55,17 +55,26 @@ class SplashScreen extends ConsumerWidget {
                 Text(
                   'Voice assistant for your apps',
                   textAlign: TextAlign.center,
-                  style: typography.sm.copyWith(
-                    color: colors.mutedForeground,
-                  ),
+                  style: typography.sm.copyWith(color: colors.mutedForeground),
                 ),
                 const SizedBox(height: 40),
+                // Aggregate progress bar
+                if (!init.isReady && !init.hasFailure) ...[
+                  _ProgressBar(
+                    progress: init.aggregateProgress,
+                    indeterminate: init.aggregateProgress == null,
+                    isFailed: false,
+                  ),
+                  const SizedBox(height: 20),
+                ],
                 // Per-model progress
                 _ModelRow(
                   label: 'EmbeddingGemma',
                   stage: init.embedding.stage.name,
                   message: init.embedding.message,
                   progress: init.embedding.progress,
+                  receivedBytes: init.embedding.receivedBytes,
+                  totalBytes: init.embedding.totalBytes,
                   isReady: init.embedding.isReady,
                   isFailed: init.embedding.stage == EmbeddingStage.failed,
                   isBusy: init.embedding.isBusy,
@@ -77,8 +86,7 @@ class SplashScreen extends ConsumerWidget {
                   message: init.slotFilling.message,
                   progress: init.slotFilling.progress,
                   isReady: init.slotFilling.isReady,
-                  isFailed:
-                      init.slotFilling.stage == SlotFillingStage.failed,
+                  isFailed: init.slotFilling.stage == SlotFillingStage.failed,
                   isBusy: init.slotFilling.isBusy,
                 ),
                 const SizedBox(height: 14),
@@ -87,18 +95,48 @@ class SplashScreen extends ConsumerWidget {
                   error: init.registryError,
                 ),
                 const SizedBox(height: 32),
-                if (init.hasFailure)
-                  _FailurePanel(message: init.failureMessage ?? 'Unknown error')
-                else
-                  Text(
-                    init.isReady
-                        ? 'Ready.'
-                        : 'Preparing on-device models…',
-                    textAlign: TextAlign.center,
-                    style: typography.sm.copyWith(
-                      color: colors.mutedForeground,
+                // First-run explanation: shown when both models are downloading
+                // (no cache), so the user understands why hundreds of MB are
+                // being fetched before they can use the assistant.
+                if (init.embedding.stage == EmbeddingStage.downloading &&
+                    init.slotFilling.stage == SlotFillingStage.downloading)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      'Downloading on-device AI models (~830 MB). '
+                      'This happens once — after this, Hark works offline.',
+                      textAlign: TextAlign.center,
+                      style: typography.xs.copyWith(
+                        color: colors.mutedForeground,
+                      ),
                     ),
                   ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  child: init.hasFailure
+                      ? _FailurePanel(
+                          key: const ValueKey('failure'),
+                          message: init.failureMessage ?? 'Unknown error',
+                          onRetry: () =>
+                              ref.read(initProvider.notifier).retryAll(),
+                          isDegraded: init.isDegraded,
+                          onContinueDegraded: init.isDegraded
+                              ? () => ref
+                                    .read(initProvider.notifier)
+                                    .acceptDegraded()
+                              : null,
+                        )
+                      : Text(
+                          init.isReady
+                              ? 'Ready.'
+                              : 'Preparing on-device models…',
+                          key: ValueKey(init.isReady ? 'ready' : 'preparing'),
+                          textAlign: TextAlign.center,
+                          style: typography.sm.copyWith(
+                            color: colors.mutedForeground,
+                          ),
+                        ),
+                ),
               ],
             ),
           ),
@@ -117,15 +155,26 @@ class _ModelRow extends StatelessWidget {
     required this.isReady,
     required this.isFailed,
     required this.isBusy,
+    this.receivedBytes,
+    this.totalBytes,
   });
 
   final String label;
   final String stage;
   final String message;
   final double? progress;
+  final int? receivedBytes;
+  final int? totalBytes;
   final bool isReady;
   final bool isFailed;
   final bool isBusy;
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,21 +183,28 @@ class _ModelRow extends StatelessWidget {
     final accent = isFailed
         ? colors.destructive
         : isReady
-            ? colors.primary
-            : colors.mutedForeground;
+        ? colors.primary
+        : colors.mutedForeground;
+
+    // Build the sub-label: byte progress when downloading, otherwise message.
+    String? subLabel;
+    if (receivedBytes != null && totalBytes != null && totalBytes! > 0) {
+      subLabel =
+          '${_formatBytes(receivedBytes!)} / ${_formatBytes(totalBytes!)}';
+    } else if (!isReady && !isFailed && message.isNotEmpty) {
+      subLabel = message;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            Container(
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 400),
               width: 8,
               height: 8,
-              decoration: BoxDecoration(
-                color: accent,
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -160,13 +216,23 @@ class _ModelRow extends StatelessWidget {
                 ),
               ),
             ),
-            Text(
-              isFailed
-                  ? 'Failed'
-                  : isReady
-                      ? 'Ready'
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Text(
+                isFailed
+                    ? 'Failed'
+                    : isReady
+                    ? 'Ready'
+                    : stage,
+                key: ValueKey(
+                  isFailed
+                      ? 'failed'
+                      : isReady
+                      ? 'ready'
                       : stage,
-              style: typography.xs.copyWith(color: accent),
+                ),
+                style: typography.xs.copyWith(color: accent),
+              ),
             ),
           ],
         ),
@@ -176,10 +242,10 @@ class _ModelRow extends StatelessWidget {
           indeterminate: isBusy && progress == null,
           isFailed: isFailed,
         ),
-        if (!isReady && !isFailed && message.isNotEmpty) ...[
+        if (subLabel != null) ...[
           const SizedBox(height: 4),
           Text(
-            message,
+            subLabel,
             style: typography.xs.copyWith(color: colors.mutedForeground),
           ),
         ],
@@ -202,18 +268,16 @@ class _RegistryRow extends StatelessWidget {
     final accent = failed
         ? colors.destructive
         : ready
-            ? colors.primary
-            : colors.mutedForeground;
+        ? colors.primary
+        : colors.mutedForeground;
 
     return Row(
       children: [
-        Container(
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 400),
           width: 8,
           height: 8,
-          decoration: BoxDecoration(
-            color: accent,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -225,9 +289,19 @@ class _RegistryRow extends StatelessWidget {
             ),
           ),
         ),
-        Text(
-          failed ? 'Failed' : (ready ? 'Ready' : 'Scanning…'),
-          style: typography.xs.copyWith(color: accent),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: Text(
+            failed ? 'Failed' : (ready ? 'Ready' : 'Scanning…'),
+            key: ValueKey(
+              failed
+                  ? 'failed'
+                  : ready
+                  ? 'ready'
+                  : 'scanning',
+            ),
+            style: typography.xs.copyWith(color: accent),
+          ),
         ),
       ],
     );
@@ -259,9 +333,18 @@ class _ProgressBar extends StatelessWidget {
 }
 
 class _FailurePanel extends StatelessWidget {
-  const _FailurePanel({required this.message});
+  const _FailurePanel({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.isDegraded = false,
+    this.onContinueDegraded,
+  });
 
   final String message;
+  final VoidCallback onRetry;
+  final bool isDegraded;
+  final VoidCallback? onContinueDegraded;
 
   @override
   Widget build(BuildContext context) {
@@ -282,10 +365,29 @@ class _FailurePanel extends StatelessWidget {
         Text(
           message,
           textAlign: TextAlign.center,
-          style: typography.xs.copyWith(
-            color: colors.mutedForeground,
-          ),
+          style: typography.xs.copyWith(color: colors.mutedForeground),
         ),
+        const SizedBox(height: 16),
+        Center(
+          child: FButton(onPress: onRetry, child: const Text('Retry')),
+        ),
+        if (isDegraded && onContinueDegraded != null) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: FButton(
+              onPress: onContinueDegraded!,
+              variant: FButtonVariant.outline,
+              child: const Text('Continue in limited mode'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Simple commands will work. Commands needing '
+            'parameter extraction will be unavailable.',
+            textAlign: TextAlign.center,
+            style: typography.xs.copyWith(color: colors.mutedForeground),
+          ),
+        ],
       ],
     );
   }
