@@ -8,6 +8,7 @@ import '../models/assistant_action.dart';
 import '../models/command_resolution.dart';
 import '../models/resolved_action.dart';
 import 'command_resolver.dart';
+import 'embedding_cache_store.dart';
 
 /// Async callable that embeds a query string and returns a vector.
 typedef EmbedFn = Future<List<double>?> Function(String text);
@@ -25,6 +26,7 @@ class NluCommandResolver implements CommandResolver {
     required this.embedDocument,
     required this.slotFill,
     required this.modelId,
+    this.cacheStore,
   });
 
   /// Embeds a user transcript/query. Must return a unit-length vector or
@@ -43,10 +45,36 @@ class NluCommandResolver implements CommandResolver {
   /// Model id string propagated on result/error records for logging.
   final String modelId;
 
+  /// Optional disk-backed cache store for persisting action document
+  /// embeddings across app restarts. When provided, the first
+  /// `_ensureActionEmbeddings` call loads from disk, diffs against the
+  /// current action set, and only re-embeds the delta. After each cache
+  /// rebuild, the updated cache is written back to disk.
+  final EmbeddingCacheStore? cacheStore;
+
   final Map<String, _CachedActionEmbedding> _embeddingCache = {};
+  bool _diskCacheLoaded = false;
+  bool _cacheIsDirty = false;
 
   @override
   void initialize() {}
+
+  /// Pre-build the document embedding cache for a set of actions. Call this
+  /// at app startup (after the embedding model + capability registry are
+  /// both ready) to move the ~7s cold-cache cost from the first voice
+  /// command to the init phase where the splash screen hides it.
+  ///
+  /// If a [cacheStore] was provided at construction, this also loads the
+  /// disk cache first so subsequent cold starts skip embedding entirely.
+  Future<void> preWarmEmbeddings(List<AssistantAction> actions) async {
+    final sw = Stopwatch()..start();
+    await _ensureActionEmbeddings(actions);
+    sw.stop();
+    debugPrint('NluCommandResolver: preWarmEmbeddings completed in '
+        '${sw.elapsedMilliseconds}ms for ${actions.length} actions '
+        '(${_embeddingCache.length} cached, '
+        '${_cacheIsDirty ? "wrote to disk" : "disk hit"})');
+  }
 
   @override
   Future<CommandResolutionResult> resolveCommand(
@@ -358,16 +386,42 @@ class NluCommandResolver implements CommandResolver {
   }
 
   Future<void> _ensureActionEmbeddings(List<AssistantAction> actions) async {
+    // Step 1: Load disk cache on first call (if a store was provided).
+    if (!_diskCacheLoaded && cacheStore != null) {
+      _diskCacheLoaded = true;
+      final diskEntries = await cacheStore!.load();
+      for (final entry in diskEntries.entries) {
+        _embeddingCache[entry.key] = _CachedActionEmbedding(
+          textHash: entry.value.textHash,
+          embedding: entry.value.embedding,
+        );
+      }
+      if (diskEntries.isNotEmpty) {
+        debugPrint('NluCommandResolver: loaded ${diskEntries.length} '
+            'embeddings from disk cache');
+      }
+    }
+
+    // Step 2: Prune entries for actions no longer in the active set.
     final activeKeys = <String>{
       for (final action in actions) _actionKey(action),
     };
+    final beforeCount = _embeddingCache.length;
     _embeddingCache.removeWhere((key, _) => !activeKeys.contains(key));
+    if (_embeddingCache.length < beforeCount) {
+      _cacheIsDirty = true;
+    }
 
+    // Step 3: Embed any actions that are missing or whose text changed.
+    var embedded = 0;
     for (final action in actions) {
       final key = _actionKey(action);
       final text = _buildSemanticText(action);
+      final textHash = EmbeddingCacheStore.hashText(text);
       final cached = _embeddingCache[key];
-      if (cached != null && cached.text == text) {
+
+      // Cache hit: both text hash and embedding present.
+      if (cached != null && cached.textHash == textHash) {
         continue;
       }
 
@@ -377,9 +431,28 @@ class NluCommandResolver implements CommandResolver {
       }
 
       _embeddingCache[key] = _CachedActionEmbedding(
-        text: text,
+        textHash: textHash,
         embedding: embedding,
       );
+      _cacheIsDirty = true;
+      embedded += 1;
+    }
+
+    if (embedded > 0) {
+      debugPrint('NluCommandResolver: embedded $embedded actions '
+          '(${_embeddingCache.length} total cached)');
+    }
+
+    // Step 4: Persist to disk if anything changed.
+    if (_cacheIsDirty && cacheStore != null) {
+      _cacheIsDirty = false;
+      await cacheStore!.save({
+        for (final entry in _embeddingCache.entries)
+          entry.key: CachedEmbedding(
+            textHash: entry.value.textHash,
+            embedding: entry.value.embedding,
+          ),
+      });
     }
   }
 
@@ -435,8 +508,11 @@ class _RankedAction {
 }
 
 class _CachedActionEmbedding {
-  const _CachedActionEmbedding({required this.text, required this.embedding});
+  const _CachedActionEmbedding({
+    required this.textHash,
+    required this.embedding,
+  });
 
-  final String text;
+  final String textHash;
   final List<double> embedding;
 }

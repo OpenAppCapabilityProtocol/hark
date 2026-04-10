@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'embedding_notifier.dart';
 import 'registry_provider.dart';
+import 'resolver_provider.dart';
 import 'services_providers.dart';
 import 'slot_filling_notifier.dart';
 
@@ -78,6 +79,7 @@ class InitNotifier extends Notifier<InitState> {
   // "cold start to usable" number that PHASE2 cares about.
   final Stopwatch _buildSw = Stopwatch()..start();
   bool _allReadyLogged = false;
+  bool _embeddingWarmupTriggered = false;
 
   @override
   InitState build() {
@@ -98,6 +100,33 @@ class InitNotifier extends Notifier<InitState> {
       final logger = ref.read(inferenceLoggerProvider);
       unawaited(logger.logModelLoad(
           'init.all_ready', _buildSw.elapsedMilliseconds));
+
+      // Phase 2b-2: pre-warm the action document embedding cache AFTER
+      // all models are loaded — not during init. Running it during init
+      // causes CPU contention with the slot filler's model_open on
+      // Dimensity 7025 (measured: slot_filling.model_open regressed from
+      // 16378ms to 30644ms when the warmup ran concurrently).
+      //
+      // Triggering here means:
+      // - First-ever run: 49 actions × ~280ms each = ~14s of embedding
+      //   work runs after splash. The user has the mic visible but the
+      //   first command will block on the warmup. Happens only once.
+      // - Second+ runs: the disk cache makes this ~50ms. The first
+      //   command resolves in ~200ms.
+      if (!_embeddingWarmupTriggered && registry.hasValue) {
+        _embeddingWarmupTriggered = true;
+        final actions = registry.requireValue.actions;
+        final nluResolver = ref.read(nluResolverProvider);
+        unawaited(() async {
+          final sw = Stopwatch()..start();
+          await nluResolver.preWarmEmbeddings(actions);
+          sw.stop();
+          debugPrint('HarkLoadPerf: embedding.cache_warmup '
+              '${sw.elapsedMilliseconds}ms');
+          unawaited(logger.logModelLoad(
+              'embedding.cache_warmup', sw.elapsedMilliseconds));
+        }());
+      }
     }
 
     return next;
