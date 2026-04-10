@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
 import 'router/hark_router.dart';
+import 'services/overlay_controller.dart';
 import 'theme/hark_theme.dart';
 
 Future<void> main() async {
@@ -15,6 +16,10 @@ class HarkApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Eagerly initialize the overlay bridge so the native
+    // VoiceInteractionSession can communicate with Dart immediately.
+    ref.read(overlayControllerProvider);
+
     final theme = buildHarkTheme();
     final router = ref.watch(goRouterProvider);
     return MaterialApp.router(

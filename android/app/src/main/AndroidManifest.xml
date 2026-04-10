@@ -7,7 +7,7 @@
         android:maxSdkVersion="28" />
     <application
         android:label="Hark"
-        android:name="${applicationName}"
+        android:name=".HarkApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

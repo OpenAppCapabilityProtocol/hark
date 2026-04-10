@@ -7,10 +7,17 @@ import android.provider.Settings
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+
+    override fun provideFlutterEngine(context: android.content.Context): FlutterEngine? {
+        // Reuse the pre-warmed engine from HarkApplication so the overlay
+        // session and the activity share the same Dart isolate.
+        return FlutterEngineCache.getInstance().get(HarkApplication.ENGINE_ID)
+    }
     private val resultReceiver = OacpResultReceiver()
     private var assistChannel: MethodChannel? = null
 
