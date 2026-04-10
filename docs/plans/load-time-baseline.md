@@ -8,6 +8,8 @@
 
 **Headline finding (original)**: the raw performance data pointed to a split migration — migrate the embedder to llamadart (Rule 1 fires, ~5s faster cold load), keep the current flutter_gemma slot filler (Rule 3 effectively fires, LiteRT's XNNPack CPU kernels are ~1.8× faster per inference than llama.cpp's CPU path on this hardware). The Slice 0 "hardware-bound 28s ceiling" was really about llama.cpp's implementation, not the hardware — LiteRT demonstrates the CPU can go faster.
 
+**Phase 2b result (2026-04-10)**: persistent action embedding cache shipped — total cold-start-to-fast-first-query dropped from **~24.8s to ~12.1s (51% reduction)** with zero runtime changes. Combined effect of the embedding disk cache (~6.5s saved) and the platform's XNNPack kernel cache persisting across restarts (~6s saved). Warm engine retention verified: models survive 2+ minutes in background without a foreground service.
+
 **Headline finding (revised 2026-04-10 after user decision)**: **no migration.** Stay on `flutter_embedder` AND `flutter_gemma`. Rule 1 technically fires on the embedder, but the user decided the ~5s cold-load improvement is not worth the cost: a format-change migration (ONNX → GGUF) forces a one-time 313 MB re-download for every existing user because GGUF is not compatible with the cached ONNX file, and `flutter_embedder` already has mature in-built ONNX caching that the migration would replace with hand-rolled Dart code. The revised verdict keeps both runtimes untouched and focuses Phase 2b optimization work on load-time wins that don't require changing the runtime. See §Migration decision at the bottom for the full reasoning.
 
 ---
