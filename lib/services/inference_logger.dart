@@ -47,8 +47,35 @@ class InferenceLogEntry {
       };
 }
 
+/// A single phase of model loading, timed.
+///
+/// Written to `model_load_logs/load_<date>.jsonl` alongside the existing
+/// inference logs, so we can diff cold/hot/warm timings across sessions
+/// without scraping `flutter logs`.
+class ModelLoadLogEntry {
+  final DateTime timestamp;
+  final String phase;
+  final int elapsedMs;
+  final Map<String, dynamic>? extra;
+
+  const ModelLoadLogEntry({
+    required this.timestamp,
+    required this.phase,
+    required this.elapsedMs,
+    this.extra,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'timestamp': timestamp.toIso8601String(),
+        'phase': phase,
+        'elapsed_ms': elapsedMs,
+        if (extra != null) 'extra': extra,
+      };
+}
+
 class InferenceLogger {
   Directory? _logDir;
+  Directory? _loadLogDir;
 
   Future<Directory> _getLogDir() async {
     if (_logDir != null) return _logDir!;
@@ -60,11 +87,28 @@ class InferenceLogger {
     return _logDir!;
   }
 
+  Future<Directory> _getLoadLogDir() async {
+    if (_loadLogDir != null) return _loadLogDir!;
+    final appDir = await getApplicationDocumentsDirectory();
+    _loadLogDir = Directory('${appDir.path}/model_load_logs');
+    if (!await _loadLogDir!.exists()) {
+      await _loadLogDir!.create(recursive: true);
+    }
+    return _loadLogDir!;
+  }
+
   String _todayFileName() {
     final now = DateTime.now();
     final date =
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     return 'inference_$date.jsonl';
+  }
+
+  String _todayLoadFileName() {
+    final now = DateTime.now();
+    final date =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    return 'load_$date.jsonl';
   }
 
   Future<void> log(InferenceLogEntry entry) async {
@@ -78,9 +122,46 @@ class InferenceLogger {
     }
   }
 
+  /// Record a single timed phase of model loading.
+  ///
+  /// Fires both a `HarkLoadPerf: <phase> <ms>ms` line to `debugPrint` (so
+  /// timings are grep-able in `flutter logs`) and an append to
+  /// `model_load_logs/load_<date>.jsonl` (so timings survive the log
+  /// buffer for later analysis). Safe to call from any isolate.
+  Future<void> logModelLoad(
+    String phase,
+    int elapsedMs, {
+    Map<String, dynamic>? extra,
+  }) async {
+    debugPrint('HarkLoadPerf: $phase ${elapsedMs}ms');
+    try {
+      final dir = await _getLoadLogDir();
+      final file = File('${dir.path}/${_todayLoadFileName()}');
+      final entry = ModelLoadLogEntry(
+        timestamp: DateTime.now(),
+        phase: phase,
+        elapsedMs: elapsedMs,
+        extra: extra,
+      );
+      final line = '${jsonEncode(entry.toJson())}\n';
+      await file.writeAsString(line, mode: FileMode.append);
+    } catch (e) {
+      debugPrint('InferenceLogger: Failed to write load log: $e');
+    }
+  }
+
   Future<List<FileSystemEntity>> getLogFiles() async {
     try {
       final dir = await _getLogDir();
+      return dir.listSync()..sort((a, b) => b.path.compareTo(a.path));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<FileSystemEntity>> getLoadLogFiles() async {
+    try {
+      final dir = await _getLoadLogDir();
       return dir.listSync()..sort((a, b) => b.path.compareTo(a.path));
     } catch (_) {
       return [];

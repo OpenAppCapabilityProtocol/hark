@@ -8,6 +8,7 @@ import '../models/assistant_action.dart';
 import '../models/command_resolution.dart';
 import '../models/resolved_action.dart';
 import 'command_resolver.dart';
+import 'embedding_cache_store.dart';
 
 /// Async callable that embeds a query string and returns a vector.
 typedef EmbedFn = Future<List<double>?> Function(String text);
@@ -25,6 +26,7 @@ class NluCommandResolver implements CommandResolver {
     required this.embedDocument,
     required this.slotFill,
     required this.modelId,
+    this.cacheStore,
   });
 
   /// Embeds a user transcript/query. Must return a unit-length vector or
@@ -43,10 +45,36 @@ class NluCommandResolver implements CommandResolver {
   /// Model id string propagated on result/error records for logging.
   final String modelId;
 
+  /// Optional disk-backed cache store for persisting action document
+  /// embeddings across app restarts. When provided, the first
+  /// `_ensureActionEmbeddings` call loads from disk, diffs against the
+  /// current action set, and only re-embeds the delta. After each cache
+  /// rebuild, the updated cache is written back to disk.
+  final EmbeddingCacheStore? cacheStore;
+
   final Map<String, _CachedActionEmbedding> _embeddingCache = {};
+  bool _diskCacheLoaded = false;
+  bool _cacheIsDirty = false;
 
   @override
   void initialize() {}
+
+  /// Pre-build the document embedding cache for a set of actions. Call this
+  /// at app startup (after the embedding model + capability registry are
+  /// both ready) to move the ~7s cold-cache cost from the first voice
+  /// command to the init phase where the splash screen hides it.
+  ///
+  /// If a [cacheStore] was provided at construction, this also loads the
+  /// disk cache first so subsequent cold starts skip embedding entirely.
+  Future<void> preWarmEmbeddings(List<AssistantAction> actions) async {
+    final sw = Stopwatch()..start();
+    await _ensureActionEmbeddings(actions);
+    sw.stop();
+    debugPrint('NluCommandResolver: preWarmEmbeddings completed in '
+        '${sw.elapsedMilliseconds}ms for ${actions.length} actions '
+        '(${_embeddingCache.length} cached, '
+        '${_cacheIsDirty ? "wrote to disk" : "disk hit"})');
+  }
 
   @override
   Future<CommandResolutionResult> resolveCommand(
@@ -59,6 +87,33 @@ class NluCommandResolver implements CommandResolver {
         message: 'No OACP actions are registered yet.',
         modelId: modelId,
       );
+    }
+
+    // Fast path: unambiguous keyword / alias match for zero-parameter
+    // commands. Avoids the embedding + slot-filling pipeline entirely
+    // for trivial utterances like "turn on the flashlight", "pause
+    // music", "scan qr code". Also works during cold start before
+    // models have finished loading.
+    final fastPath = _tryKeywordFastPath(transcript, actions);
+    if (fastPath != null) {
+      _debugLog('resolve_fast_path', {
+        'transcript': transcript,
+        'modelId': modelId,
+        'actionKey': '${fastPath.sourceId}.${fastPath.actionId}',
+        'matchedVia': fastPath.parameters['__matched_via'],
+      });
+      // Strip the internal bookkeeping key before returning.
+      final resolved = ResolvedAction(
+        sourceType: fastPath.sourceType,
+        sourceId: fastPath.sourceId,
+        actionId: fastPath.actionId,
+        parameters: {
+          for (final entry in fastPath.parameters.entries)
+            if (entry.key != '__matched_via') entry.key: entry.value,
+        },
+        confirmationMessage: fastPath.confirmationMessage,
+      );
+      return CommandResolutionResult.success(resolved, modelId: modelId);
     }
 
     final rankedOptions = await _rankActions(transcript, actions);
@@ -191,6 +246,107 @@ class NluCommandResolver implements CommandResolver {
     return semanticScore != null && semanticScore >= 0.35;
   }
 
+  /// Pre-embedding keyword / alias fast path for trivial zero-parameter
+  /// commands. Returns a [ResolvedAction] if the transcript unambiguously
+  /// matches exactly one action via an exact alias or a high-signal
+  /// keyword hit, AND that action has no required parameters. Otherwise
+  /// returns null and the full NLU pipeline runs.
+  ///
+  /// The returned `ResolvedAction.parameters` carries an internal
+  /// `__matched_via` key that the caller strips before returning; it is
+  /// used only for telemetry logging.
+  ///
+  /// Why this exists:
+  /// 1. Latency — "turn on the flashlight" dispatches in microseconds.
+  /// 2. Cold-start UX — commands fire before the embedding model has
+  ///    finished loading during a fresh process launch.
+  /// 3. Robustness — if the models fail to load, simple commands still
+  ///    work.
+  ResolvedAction? _tryKeywordFastPath(
+    String transcript,
+    List<AssistantAction> actions,
+  ) {
+    final normalized = transcript.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+
+    // Only fire for actions with no required params — filling typed
+    // slots needs the LLM even if the action itself is unambiguous.
+    bool hasNoRequiredParams(AssistantAction a) =>
+        !a.parameters.any((p) => p.required);
+
+    // Pass 1: exact alias match. An action's `aliases` list is a
+    // curated set of "the user literally said this" phrases. Exact
+    // equality is the strongest possible signal.
+    final exactAliasHits = <AssistantAction>[];
+    for (final action in actions) {
+      if (!hasNoRequiredParams(action)) continue;
+      for (final alias in action.aliases) {
+        if (alias.toLowerCase().trim() == normalized) {
+          exactAliasHits.add(action);
+          break;
+        }
+      }
+    }
+    if (exactAliasHits.length == 1) {
+      return _buildFastPathResolution(exactAliasHits.single, 'exact_alias');
+    }
+    if (exactAliasHits.length > 1) {
+      // Multiple actions claim the same alias — ambiguous, fall through
+      // to the embedding model to decide.
+      return null;
+    }
+
+    // Pass 2: keyword substring match. Keywords are single words or
+    // short phrases that strongly imply the action (e.g. "flashlight",
+    // "scan qr"). We require the keyword to appear as a whole token in
+    // the transcript, not as a substring inside another word.
+    final keywordHits = <AssistantAction>[];
+    for (final action in actions) {
+      if (!hasNoRequiredParams(action)) continue;
+      for (final keyword in action.keywords) {
+        final kw = keyword.toLowerCase().trim();
+        if (kw.isEmpty) continue;
+        if (_containsAsWord(normalized, kw)) {
+          keywordHits.add(action);
+          break;
+        }
+      }
+    }
+    if (keywordHits.length == 1) {
+      return _buildFastPathResolution(keywordHits.single, 'keyword');
+    }
+
+    // Ambiguous or no hit — fall through to embedding.
+    return null;
+  }
+
+  /// True if [needle] appears in [haystack] as a complete whitespace- or
+  /// punctuation-delimited token (or sequence of tokens for multi-word
+  /// needles). Avoids matching "pause" inside "pauseplay" or "can" in
+  /// "cancel".
+  bool _containsAsWord(String haystack, String needle) {
+    final escaped = RegExp.escape(needle);
+    // \b would work for ASCII but fails on unicode word boundaries.
+    // Use a simple before/after character class instead.
+    final pattern = RegExp(r'(^|[^a-z0-9])' + escaped + r'([^a-z0-9]|$)');
+    return pattern.hasMatch(haystack);
+  }
+
+  /// Wraps a matched action in a [ResolvedAction] with empty params and
+  /// a telemetry marker.
+  ResolvedAction _buildFastPathResolution(
+    AssistantAction action,
+    String matchedVia,
+  ) {
+    return ResolvedAction(
+      sourceType: action.sourceType.name,
+      sourceId: action.sourceId,
+      actionId: action.actionId,
+      parameters: {'__matched_via': matchedVia},
+      confirmationMessage: action.confirmationMessage,
+    );
+  }
+
   Future<List<_RankedAction>> _rankActions(
     String transcript,
     List<AssistantAction> actions,
@@ -230,16 +386,42 @@ class NluCommandResolver implements CommandResolver {
   }
 
   Future<void> _ensureActionEmbeddings(List<AssistantAction> actions) async {
+    // Step 1: Load disk cache on first call (if a store was provided).
+    if (!_diskCacheLoaded && cacheStore != null) {
+      _diskCacheLoaded = true;
+      final diskEntries = await cacheStore!.load();
+      for (final entry in diskEntries.entries) {
+        _embeddingCache[entry.key] = _CachedActionEmbedding(
+          textHash: entry.value.textHash,
+          embedding: entry.value.embedding,
+        );
+      }
+      if (diskEntries.isNotEmpty) {
+        debugPrint('NluCommandResolver: loaded ${diskEntries.length} '
+            'embeddings from disk cache');
+      }
+    }
+
+    // Step 2: Prune entries for actions no longer in the active set.
     final activeKeys = <String>{
       for (final action in actions) _actionKey(action),
     };
+    final beforeCount = _embeddingCache.length;
     _embeddingCache.removeWhere((key, _) => !activeKeys.contains(key));
+    if (_embeddingCache.length < beforeCount) {
+      _cacheIsDirty = true;
+    }
 
+    // Step 3: Embed any actions that are missing or whose text changed.
+    var embedded = 0;
     for (final action in actions) {
       final key = _actionKey(action);
       final text = _buildSemanticText(action);
+      final textHash = EmbeddingCacheStore.hashText(text);
       final cached = _embeddingCache[key];
-      if (cached != null && cached.text == text) {
+
+      // Cache hit: both text hash and embedding present.
+      if (cached != null && cached.textHash == textHash) {
         continue;
       }
 
@@ -249,9 +431,28 @@ class NluCommandResolver implements CommandResolver {
       }
 
       _embeddingCache[key] = _CachedActionEmbedding(
-        text: text,
+        textHash: textHash,
         embedding: embedding,
       );
+      _cacheIsDirty = true;
+      embedded += 1;
+    }
+
+    if (embedded > 0) {
+      debugPrint('NluCommandResolver: embedded $embedded actions '
+          '(${_embeddingCache.length} total cached)');
+    }
+
+    // Step 4: Persist to disk if anything changed.
+    if (_cacheIsDirty && cacheStore != null) {
+      _cacheIsDirty = false;
+      await cacheStore!.save({
+        for (final entry in _embeddingCache.entries)
+          entry.key: CachedEmbedding(
+            textHash: entry.value.textHash,
+            embedding: entry.value.embedding,
+          ),
+      });
     }
   }
 
@@ -307,8 +508,11 @@ class _RankedAction {
 }
 
 class _CachedActionEmbedding {
-  const _CachedActionEmbedding({required this.text, required this.embedding});
+  const _CachedActionEmbedding({
+    required this.textHash,
+    required this.embedding,
+  });
 
-  final String text;
+  final String textHash;
   final List<double> embedding;
 }

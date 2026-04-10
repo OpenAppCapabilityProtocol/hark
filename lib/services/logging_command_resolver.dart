@@ -13,6 +13,10 @@ class LoggingCommandResolver implements CommandResolver {
   final CommandResolver _delegate;
   final InferenceLogger _logger;
 
+  /// Exposes the underlying resolver for callers that need the concrete
+  /// type (e.g. to call `NluCommandResolver.preWarmEmbeddings`).
+  CommandResolver get delegate => _delegate;
+
   /// Model id used when the delegate did not surface one on the result.
   final String fallbackModelId;
 

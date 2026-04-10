@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "description": "Hark llamadart quantization benchmark — slot-filling gold set. 15 cases across parameter types found in the real-examples OACP manifests: single-string, multi-string, integer-with-range, optional-field handling, and implicit-null cases. Used to verify that a quantized Qwen3 0.6B still produces valid JSON and correct parameter values for the slot-filling task.",
+  "created": "2026-04-10",
+  "fixtures": {
+    "wikipedia.search_articles": {
+      "description": "Open Wikipedia search results for a topic, phrase, or article name.",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "description": "The search text to run in Wikipedia.",
+          "examples": ["Ada Lovelace", "black holes"]
+        }
+      ]
+    },
+    "wikipedia.open_article": {
+      "description": "Open a specific Wikipedia article by exact title.",
+      "parameters": [
+        {
+          "name": "article_title",
+          "type": "string",
+          "required": true,
+          "description": "The exact title of the Wikipedia article to open.",
+          "examples": ["Ada Lovelace", "Kyoto"]
+        },
+        {
+          "name": "language_code",
+          "type": "string",
+          "required": false,
+          "description": "Two-letter language code (e.g. 'en', 'es', 'fr'). Defaults to English if not specified."
+        }
+      ]
+    },
+    "archivetune.play_music": {
+      "description": "Start music playback in ArchiveTune. Optionally filter by a search query or artist.",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": false,
+          "description": "A song, album, or search phrase to play.",
+          "examples": ["Bohemian Rhapsody", "lo-fi beats"]
+        },
+        {
+          "name": "artist",
+          "type": "string",
+          "required": false,
+          "description": "An artist name to filter by."
+        }
+      ]
+    },
+    "binaryeye.create_barcode": {
+      "description": "Generate a new barcode or QR code with the given content.",
+      "parameters": [
+        {
+          "name": "content",
+          "type": "string",
+          "required": true,
+          "description": "The text, URL, or data to encode in the barcode.",
+          "examples": ["https://example.com", "hello world"]
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "description": "The barcode format. Defaults to QR_CODE.",
+          "examples": ["QR_CODE", "EAN_13", "CODE_128"]
+        }
+      ]
+    },
+    "breezyweather.check_forecast": {
+      "description": "Show the weather forecast for the coming days at a location.",
+      "parameters": [
+        {
+          "name": "location",
+          "type": "string",
+          "required": false,
+          "description": "City name or location to forecast for. Defaults to current location.",
+          "examples": ["Tokyo", "San Francisco"]
+        },
+        {
+          "name": "days",
+          "type": "integer",
+          "required": false,
+          "minimum": 1,
+          "maximum": 7,
+          "description": "Number of days to include in the forecast. Defaults to 3."
+        }
+      ]
+    },
+    "librecamera.take_photo_rear_camera": {
+      "description": "Take a photo with the rear camera, optionally with a self-timer delay.",
+      "parameters": [
+        {
+          "name": "duration_seconds",
+          "type": "integer",
+          "required": false,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Self-timer delay in seconds before the photo is taken. Defaults to 0 (no timer)."
+        }
+      ]
+    },
+    "librecamera.take_photo_front_camera": {
+      "description": "Take a selfie with the front camera, optionally with a self-timer delay.",
+      "parameters": [
+        {
+          "name": "duration_seconds",
+          "type": "integer",
+          "required": false,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Self-timer delay in seconds before the selfie is taken."
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "sf01",
+      "category": "string_single_required",
+      "utterance": "search Wikipedia for Ada Lovelace",
+      "action_key": "wikipedia.search_articles",
+      "expected": {"query": "Ada Lovelace"}
+    },
+    {
+      "id": "sf02",
+      "category": "string_single_required",
+      "utterance": "look up black holes on Wikipedia",
+      "action_key": "wikipedia.search_articles",
+      "expected": {"query": "black holes"}
+    },
+    {
+      "id": "sf03",
+      "category": "string_single_required",
+      "utterance": "open the Wikipedia article for Kyoto",
+      "action_key": "wikipedia.open_article",
+      "expected": {"article_title": "Kyoto"}
+    },
+    {
+      "id": "sf04",
+      "category": "string_multi_optional",
+      "utterance": "open the Kyoto article in Japanese Wikipedia",
+      "action_key": "wikipedia.open_article",
+      "expected": {"article_title": "Kyoto", "language_code": "ja"}
+    },
+    {
+      "id": "sf05",
+      "category": "string_all_optional_all_null",
+      "utterance": "play some music",
+      "action_key": "archivetune.play_music",
+      "expected": {}
+    },
+    {
+      "id": "sf06",
+      "category": "string_all_optional_one_set",
+      "utterance": "play Bohemian Rhapsody",
+      "action_key": "archivetune.play_music",
+      "expected": {"query": "Bohemian Rhapsody"}
+    },
+    {
+      "id": "sf07",
+      "category": "string_all_optional_two_set",
+      "utterance": "play songs by Taylor Swift",
+      "action_key": "archivetune.play_music",
+      "expected": {"artist": "Taylor Swift"}
+    },
+    {
+      "id": "sf08",
+      "category": "string_url",
+      "utterance": "create a QR code for https://example.com",
+      "action_key": "binaryeye.create_barcode",
+      "expected": {"content": "https://example.com"}
+    },
+    {
+      "id": "sf09",
+      "category": "string_freeform",
+      "utterance": "make a QR code that says hello world",
+      "action_key": "binaryeye.create_barcode",
+      "expected": {"content": "hello world"}
+    },
+    {
+      "id": "sf10",
+      "category": "string_and_enum_like",
+      "utterance": "generate an EAN 13 barcode for 1234567890128",
+      "action_key": "binaryeye.create_barcode",
+      "expected": {"content": "1234567890128", "format": "EAN_13"}
+    },
+    {
+      "id": "sf11",
+      "category": "integer_in_range",
+      "utterance": "show me the 7-day forecast for Tokyo",
+      "action_key": "breezyweather.check_forecast",
+      "expected": {"location": "Tokyo", "days": 7}
+    },
+    {
+      "id": "sf12",
+      "category": "integer_at_boundary",
+      "utterance": "forecast for tomorrow in San Francisco",
+      "action_key": "breezyweather.check_forecast",
+      "expected": {"location": "San Francisco", "days": 1}
+    },
+    {
+      "id": "sf13",
+      "category": "integer_optional_missing",
+      "utterance": "what's the weather going to be like in Paris",
+      "action_key": "breezyweather.check_forecast",
+      "expected": {"location": "Paris"}
+    },
+    {
+      "id": "sf14",
+      "category": "integer_only_optional",
+      "utterance": "take a photo in 5 seconds",
+      "action_key": "librecamera.take_photo_rear_camera",
+      "expected": {"duration_seconds": 5}
+    },
+    {
+      "id": "sf15",
+      "category": "integer_selfie_timer",
+      "utterance": "take a selfie in 10 seconds",
+      "action_key": "librecamera.take_photo_front_camera",
+      "expected": {"duration_seconds": 10}
+    }
+  ]
+}
