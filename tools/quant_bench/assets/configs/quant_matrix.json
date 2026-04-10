@@ -1,8 +1,9 @@
 {
-  "version": 2,
-  "description": "Hark llamadart quantization benchmark — matrix of (model, quant) combinations to test. Uses ONLY first-party / top-tier GGUF publishers: ggml-org (official llama.cpp team) for EmbeddingGemma, Qwen (model author) for Qwen3. Neither publishes Q4_K_M or Q5_K_M for these specific models, so we test Q8_0 only. If Q8_0 passes the quality gate with room to spare, we ship it. If we later want a smaller variant for size reasons, that becomes an explicit trust decision about community quantizers — not something to default into.",
+  "version": 3,
+  "description": "Hark llamadart quantization benchmark — full Q8/Q4 matrix across Qwen3 0.6B and Qwen2.5 0.5B Instruct, plus EmbeddingGemma 300M Q8_0. Trust tier is first-party only: ggml-org for EmbeddingGemma + Qwen3 (0.6B Q4_0 since Q4_K_M is not published by any first-party source for this model), Qwen team for Qwen2.5 (full quant ladder available, we test Q8_0 and Q4_K_M). The bench measures all quants for every model regardless of pass/fail so we get the full latency curve in one run — see escalation_policy.",
   "created": "2026-04-10",
-  "escalation_policy": "q8-only",
+  "escalation_policy": "measure_all_quants",
+  "escalation_policy_note": "When set to 'measure_all_quants', the bench runs every quant for every model and records its perf and quality regardless of whether the gate passes. When set to 'q8-only' (the original behavior), the runner stops at the first quant that passes the quality gate. We use 'measure_all_quants' for exploration phases where we need the full latency curve to make architectural decisions.",
   "trust_tier_note": "Current main branch ships onnx-community/embeddinggemma-300m-ONNX (model_q4.onnx) and litert-community/Qwen3-0.6B (Qwen3-0.6B.litertlm). These are the format-specific first-party orgs for ONNX and LiteRT-LM respectively. ggml-org and Qwen are the equivalent first-party tier for GGUF.",
   "models": {
     "embeddinggemma": {
@@ -43,8 +44,19 @@
       },
       "quants": [
         {
-          "tag": "Q8_0",
+          "tag": "Q4_0",
           "priority": 1,
+          "repo": "ggml-org/Qwen3-0.6B-GGUF",
+          "publisher_tier": "first_party",
+          "publisher_note": "ggml-org publishes Qwen3-0.6B in Q4_0, Q8_0, f16. Q4_K_M is NOT published by any first-party source for Qwen3-0.6B (neither ggml-org nor Qwen team), so Q4_0 is the only first-party Q4 option. Q4_0 is the older block-wise quantization (32 weights per block, single FP16 scale), historically slightly worse quality than Q4_K_M but a valid first-party choice.",
+          "filename_candidates": [
+            "Qwen3-0.6B-Q4_0.gguf"
+          ],
+          "expected_size_mb": 409
+        },
+        {
+          "tag": "Q8_0",
+          "priority": 2,
           "repo": "Qwen/Qwen3-0.6B-GGUF",
           "publisher_tier": "first_party",
           "publisher_note": "Published by the Qwen team themselves — directly from Alibaba's model authors, same source as the litert-community Qwen3-0.6B.litertlm we currently ship.",
@@ -54,15 +66,51 @@
           "expected_size_mb": 610
         }
       ]
+    },
+    "qwen25_05b_instruct": {
+      "kind": "generation",
+      "display_name": "Qwen2.5 0.5B Instruct",
+      "context_size": 1024,
+      "quality_gate": {
+        "json_validity_min": 0.93,
+        "exact_match_min": 0.80,
+        "type_correct_min": 0.90,
+        "hallucination_max": 0.00,
+        "required_fields_populated_min": 1.00
+      },
+      "quants": [
+        {
+          "tag": "Q4_K_M",
+          "priority": 1,
+          "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+          "publisher_tier": "first_party",
+          "publisher_note": "Qwen team publishes the full quant ladder (Q2_K, Q3_K_M, Q4_0, Q4_K_M, Q5_0, Q5_K_M, Q6_K, Q8_0, fp16) for Qwen2.5-0.5B-Instruct. WARNING: Qwen2.5-0.5B is BIGGER on disk than Qwen3-0.6B at every quant level because the 151k-token vocab embedding table dominates GGUF file size at this parameter scale. The '0.5B' name refers to transformer body params, not total file size. Qwen2.5-0.5B-Instruct Q4_K_M is 480 MB; Qwen3-0.6B-Q4_0 is 409 MB (smaller). We test it anyway because the architecture and chat template differ.",
+          "filename_candidates": [
+            "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+          ],
+          "expected_size_mb": 480
+        },
+        {
+          "tag": "Q8_0",
+          "priority": 2,
+          "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+          "publisher_tier": "first_party",
+          "publisher_note": "Same first-party Qwen repo, Q8_0 quant. Plain ChatML chat template — no thinking-mode complexity. ~657 MB on disk (LARGER than Qwen3-0.6B Q8_0 at 581 MB) due to vocab embedding overhead — see Q4_K_M note.",
+          "filename_candidates": [
+            "qwen2.5-0.5b-instruct-q8_0.gguf"
+          ],
+          "expected_size_mb": 657
+        }
+      ]
     }
   },
   "fallback_strategy": {
     "embedder_only_migration": {
-      "when": "If Qwen3 Q8_0 fails the slot-filling quality gate, abandon the slot-filling migration and keep flutter_gemma for Qwen3. Only migrate the embedder.",
-      "implication": "Hark keeps two plugins (llamadart for embeddings, flutter_gemma for slot-fill) but still gets mmap + warm engine + isolate safety for the bigger model (the embedder)."
+      "when": "If no Qwen variant in this matrix passes both quality and latency gates on the target hardware (Moto G56 5G CPU), abandon the on-device generative slot-filling migration. Keep llamadart for embeddings (clear win), and either (a) escalate slot-filling to a cloud LLM, (b) replace it with an encoder-based slot tagger (Track 2 in docs/plans/llamadart-migration-findings.md), or (c) keep flutter_gemma as a no-op fallback while Track 2 ships.",
+      "implication": "The migration still ships for the embedder. Slot-filling becomes a separate workstream with its own architecture decision."
     },
     "community_quant_escalation": {
-      "when": "If we later need a smaller quant than Q8_0 for file-size reasons, the fallback is a trusted community quantizer (unsloth, bartowski, mradermacher) — but this is an EXPLICIT trust decision, not a default. Any switch away from ggml-org / Qwen must be justified by measured size or perf wins that cannot be ignored."
+      "when": "If we later need a smaller quant than Q4_0 / Q4_K_M for file-size or latency reasons, the fallback is a trusted community quantizer (unsloth, bartowski, mradermacher) — but this is an EXPLICIT trust decision, not a default. Any switch away from ggml-org / Qwen must be justified by measured size or perf wins that cannot be ignored."
     }
   }
 }

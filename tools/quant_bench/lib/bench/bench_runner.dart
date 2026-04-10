@@ -63,12 +63,18 @@ class BenchRunner {
       '${slotFillGold.cases.length} slot-fill cases, '
       '${matrix.models.length} models to test.',
     );
+    _log('Escalation policy: ${matrix.escalationPolicy}');
 
     final results = <QuantRunResult>[];
     for (final model in matrix.models.values) {
       _log('');
       _log('=== ${model.displayName} (${model.kind.name}) ===');
-      // Priority-ordered escalation: stop at first pass.
+      // Priority-ordered iteration. When the matrix sets
+      // escalation_policy=q8-only we stop at the first PASS
+      // (production escalation behavior). When it sets
+      // measure_all_quants we run every quant for every model
+      // regardless of pass/fail so we get the full latency curve
+      // in one run — used during exploration phases.
       for (final quant in model.quants) {
         final result = await _runOneQuant(
           model: model,
@@ -79,6 +85,13 @@ class BenchRunner {
         results.add(result);
 
         if (result.passedQualityGate) {
+          if (matrix.measureAllQuants) {
+            _log(
+              'PASS ${model.displayName} ${quant.tag} — '
+              'continuing (measure_all_quants).',
+            );
+            continue;
+          }
           _log(
             'PASS ${model.displayName} ${quant.tag} — stopping escalation.',
           );
@@ -93,7 +106,7 @@ class BenchRunner {
         }
         _log(
           'FAIL ${model.displayName} ${quant.tag} — '
-          'escalating to next quant.',
+          '${matrix.measureAllQuants ? "continuing" : "escalating to next quant"}.',
         );
       }
     }

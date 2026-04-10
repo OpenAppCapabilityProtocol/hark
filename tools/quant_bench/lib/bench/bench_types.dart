@@ -404,15 +404,35 @@ class ModelConfig {
 }
 
 class QuantMatrixConfig {
-  const QuantMatrixConfig({required this.models});
+  const QuantMatrixConfig({
+    required this.models,
+    required this.escalationPolicy,
+  });
 
   final Map<String, ModelConfig> models;
+
+  /// Controls whether the runner stops at the first quant that
+  /// passes the quality gate, or measures every quant for every
+  /// model regardless of pass/fail.
+  ///
+  /// - `q8-only` (default): early-exit at first PASS — production
+  ///   escalation behavior, fastest run, smallest results.
+  /// - `measure_all_quants`: run every quant for every model and
+  ///   record perf + quality for each. Used during exploration
+  ///   phases when we need the full latency curve to make
+  ///   architectural decisions, even when one quant already passes.
+  final String escalationPolicy;
+
+  bool get measureAllQuants => escalationPolicy == 'measure_all_quants';
 
   factory QuantMatrixConfig.fromJson(Map<String, dynamic> json) {
     final modelsRaw = (json['models'] as Map<String, dynamic>).map(
       (k, v) => MapEntry(k, ModelConfig.fromJson(k, v as Map<String, dynamic>)),
     );
-    return QuantMatrixConfig(models: modelsRaw);
+    return QuantMatrixConfig(
+      models: modelsRaw,
+      escalationPolicy: (json['escalation_policy'] as String?) ?? 'q8-only',
+    );
   }
 }
 

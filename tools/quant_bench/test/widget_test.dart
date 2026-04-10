@@ -75,9 +75,10 @@ void main() {
   test('quant matrix config parses cleanly', () async {
     final json = await _loadAsset('assets/configs/quant_matrix.json');
     final matrix = QuantMatrixConfig.fromJson(json);
-    expect(matrix.models.length, 2);
+    expect(matrix.models.length, 3);
     expect(matrix.models.containsKey('embeddinggemma'), isTrue);
     expect(matrix.models.containsKey('qwen3_06b'), isTrue);
+    expect(matrix.models.containsKey('qwen25_05b_instruct'), isTrue);
 
     // Each model has at least one quant, priority-sorted low → high.
     for (final model in matrix.models.values) {
@@ -90,8 +91,16 @@ void main() {
       }
     }
 
-    // v2 matrix uses only first-party Q8_0 sources.
+    // v3 matrix: EmbeddingGemma still Q8_0 only.
     expect(matrix.models['embeddinggemma']!.quants.first.tag, 'Q8_0');
-    expect(matrix.models['qwen3_06b']!.quants.first.tag, 'Q8_0');
+    // Qwen3 0.6B: Q4_0 first (priority 1), Q8_0 fallback.
+    expect(matrix.models['qwen3_06b']!.quants.first.tag, 'Q4_0');
+    expect(matrix.models['qwen3_06b']!.quants.last.tag, 'Q8_0');
+    // Qwen2.5 0.5B Instruct: Q4_K_M first (smallest), Q8_0 fallback.
+    expect(matrix.models['qwen25_05b_instruct']!.quants.first.tag, 'Q4_K_M');
+    expect(matrix.models['qwen25_05b_instruct']!.quants.last.tag, 'Q8_0');
+    // v3 escalation policy is measure_all_quants for full latency curve.
+    expect(matrix.escalationPolicy, 'measure_all_quants');
+    expect(matrix.measureAllQuants, isTrue);
   });
 }
