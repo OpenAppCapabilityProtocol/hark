@@ -37,8 +37,7 @@ class EmbeddingState {
 
   bool get isReady => stage == EmbeddingStage.ready && embedder != null;
   bool get isBusy =>
-      stage == EmbeddingStage.downloading ||
-      stage == EmbeddingStage.loading;
+      stage == EmbeddingStage.downloading || stage == EmbeddingStage.loading;
 
   EmbeddingState copyWith({
     EmbeddingStage? stage,
@@ -59,8 +58,7 @@ class EmbeddingState {
       receivedBytes: clearReceivedBytes
           ? null
           : (receivedBytes ?? this.receivedBytes),
-      totalBytes:
-          clearTotalBytes ? null : (totalBytes ?? this.totalBytes),
+      totalBytes: clearTotalBytes ? null : (totalBytes ?? this.totalBytes),
       embedder: clearEmbedder ? null : (embedder ?? this.embedder),
     );
   }
@@ -105,6 +103,16 @@ class EmbeddingNotifier extends Notifier<EmbeddingState> {
   /// True when the model has been fully loaded and is ready for inference.
   bool get isReady => state.embedder != null;
 
+  /// Reset and re-attempt initialization. Used by the splash retry button.
+  void retry() {
+    _initFuture = null;
+    state = const EmbeddingState(
+      stage: EmbeddingStage.idle,
+      message: 'Preparing EmbeddingGemma...',
+    );
+    _initFuture = _initialize();
+  }
+
   /// Embed a short query string. Applies the EmbeddingGemma query prompt
   /// template via [GemmaEmbedder.formatQuery] and returns an L2-normalized
   /// vector, matching the legacy service's exact behavior.
@@ -147,71 +155,101 @@ class EmbeddingNotifier extends Notifier<EmbeddingState> {
     final totalSw = Stopwatch()..start();
     try {
       debugPrint('EmbeddingNotifier: starting initialization...');
-      _setState(const EmbeddingState(
-        stage: EmbeddingStage.loading,
-        message: 'Initializing EmbeddingGemma runtime...',
-      ));
+      _setState(
+        const EmbeddingState(
+          stage: EmbeddingStage.loading,
+          message: 'Initializing EmbeddingGemma runtime...',
+        ),
+      );
 
       final runtimeSw = Stopwatch()..start();
       await initFlutterEmbedder();
       runtimeSw.stop();
-      unawaited(logger.logModelLoad(
-          'embedding.runtime_init', runtimeSw.elapsedMilliseconds));
+      unawaited(
+        logger.logModelLoad(
+          'embedding.runtime_init',
+          runtimeSw.elapsedMilliseconds,
+        ),
+      );
       if (_disposed) return;
       debugPrint('EmbeddingNotifier: runtime initialized OK');
 
       final managerSw = Stopwatch()..start();
       _modelManager ??= await ModelManager.withDefaultCacheDir();
       managerSw.stop();
-      unawaited(logger.logModelLoad(
-          'embedding.manager_init', managerSw.elapsedMilliseconds));
+      unawaited(
+        logger.logModelLoad(
+          'embedding.manager_init',
+          managerSw.elapsedMilliseconds,
+        ),
+      );
       if (_disposed) return;
 
       // Check if model is already downloaded
       final cacheSw = Stopwatch()..start();
       final localModel = await _modelManager!.getLocalModel(modelId);
       cacheSw.stop();
-      unawaited(logger.logModelLoad(
-          'embedding.cache_lookup', cacheSw.elapsedMilliseconds));
+      unawaited(
+        logger.logModelLoad(
+          'embedding.cache_lookup',
+          cacheSw.elapsedMilliseconds,
+        ),
+      );
       if (_disposed) return;
       if (localModel != null) {
         debugPrint(
-            'EmbeddingNotifier: model already cached, loading from disk...');
-        _setState(const EmbeddingState(
-          stage: EmbeddingStage.loading,
-          message: 'Loading EmbeddingGemma from cache...',
-        ));
+          'EmbeddingNotifier: model already cached, loading from disk...',
+        );
+        _setState(
+          const EmbeddingState(
+            stage: EmbeddingStage.loading,
+            message: 'Loading EmbeddingGemma from cache...',
+          ),
+        );
         final createSw = Stopwatch()..start();
         final embedder = GemmaEmbedder.create(
           modelPath: localModel.modelPath,
           tokenizerPath: localModel.tokenizerPath,
         );
         createSw.stop();
-        unawaited(logger.logModelLoad(
-            'embedding.model_create', createSw.elapsedMilliseconds));
+        unawaited(
+          logger.logModelLoad(
+            'embedding.model_create',
+            createSw.elapsedMilliseconds,
+          ),
+        );
         if (_disposed) return;
         debugPrint('EmbeddingNotifier: model loaded from cache!');
-        _setState(EmbeddingState(
-          stage: EmbeddingStage.ready,
-          message: 'EmbeddingGemma ready',
-          embedder: embedder,
-        ));
+        _setState(
+          EmbeddingState(
+            stage: EmbeddingStage.ready,
+            message: 'EmbeddingGemma ready',
+            embedder: embedder,
+          ),
+        );
         totalSw.stop();
-        unawaited(logger.logModelLoad(
-            'embedding.total', totalSw.elapsedMilliseconds,
-            extra: {'path': 'cache_hit'}));
+        unawaited(
+          logger.logModelLoad(
+            'embedding.total',
+            totalSw.elapsedMilliseconds,
+            extra: {'path': 'cache_hit'},
+          ),
+        );
         return;
       }
 
       // Not cached — download from HuggingFace
-      _setState(const EmbeddingState(
-        stage: EmbeddingStage.downloading,
-        message: 'Downloading EmbeddingGemma model...',
-        progress: 0,
-      ));
+      _setState(
+        const EmbeddingState(
+          stage: EmbeddingStage.downloading,
+          message: 'Downloading EmbeddingGemma model...',
+          progress: 0,
+        ),
+      );
 
       debugPrint(
-          'EmbeddingNotifier: starting model download from HuggingFace...');
+        'EmbeddingNotifier: starting model download from HuggingFace...',
+      );
       final embedder = await GemmaEmbedderFactory.fromHuggingFace(
         manager: _modelManager,
         onnxFile: 'onnx/model_q4.onnx',
@@ -225,40 +263,55 @@ class EmbeddingNotifier extends Notifier<EmbeddingState> {
                 '(${_formatBytes(received)} / ${_formatBytes(total)})',
               );
             }
-            _setState(EmbeddingState(
-              stage: EmbeddingStage.downloading,
-              message: 'Downloading EmbeddingGemma... '
-                  '${_formatBytes(received)} / ${_formatBytes(total)}',
-              progress: received / total,
-              receivedBytes: received,
-              totalBytes: total,
-            ));
+            _setState(
+              EmbeddingState(
+                stage: EmbeddingStage.downloading,
+                message:
+                    'Downloading EmbeddingGemma... '
+                    '${_formatBytes(received)} / ${_formatBytes(total)}',
+                progress: received / total,
+                receivedBytes: received,
+                totalBytes: total,
+              ),
+            );
           }
         },
       );
 
       if (_disposed) return;
       debugPrint('EmbeddingNotifier: model loaded successfully!');
-      _setState(EmbeddingState(
-        stage: EmbeddingStage.ready,
-        message: 'EmbeddingGemma ready',
-        embedder: embedder,
-      ));
+      _setState(
+        EmbeddingState(
+          stage: EmbeddingStage.ready,
+          message: 'EmbeddingGemma ready',
+          embedder: embedder,
+        ),
+      );
       totalSw.stop();
-      unawaited(logger.logModelLoad(
-          'embedding.total', totalSw.elapsedMilliseconds,
-          extra: {'path': 'downloaded'}));
+      unawaited(
+        logger.logModelLoad(
+          'embedding.total',
+          totalSw.elapsedMilliseconds,
+          extra: {'path': 'downloaded'},
+        ),
+      );
     } catch (error, stackTrace) {
       debugPrint('EmbeddingNotifier: failed to initialize: $error');
       debugPrint('EmbeddingNotifier: stackTrace: $stackTrace');
-      _setState(EmbeddingState(
-        stage: EmbeddingStage.failed,
-        message: 'EmbeddingGemma failed: $error',
-      ));
+      _setState(
+        EmbeddingState(
+          stage: EmbeddingStage.failed,
+          message: 'EmbeddingGemma failed: $error',
+        ),
+      );
       totalSw.stop();
-      unawaited(logger.logModelLoad(
-          'embedding.total', totalSw.elapsedMilliseconds,
-          extra: {'path': 'failed'}));
+      unawaited(
+        logger.logModelLoad(
+          'embedding.total',
+          totalSw.elapsedMilliseconds,
+          extra: {'path': 'failed'},
+        ),
+      );
       _initFuture = null;
     }
   }
@@ -287,7 +340,6 @@ class EmbeddingNotifier extends Notifier<EmbeddingState> {
 }
 
 /// Riverpod provider that exposes the [EmbeddingNotifier] and its state.
-final embeddingProvider =
-    NotifierProvider<EmbeddingNotifier, EmbeddingState>(
+final embeddingProvider = NotifierProvider<EmbeddingNotifier, EmbeddingState>(
   EmbeddingNotifier.new,
 );

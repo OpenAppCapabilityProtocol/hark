@@ -93,6 +93,16 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
   /// True when the model has been fully loaded and is ready for inference.
   bool get isReady => state.model != null;
 
+  /// Reset and re-attempt initialization. Used by the splash retry button.
+  void retry() {
+    _initFuture = null;
+    state = const SlotFillingState(
+      stage: SlotFillingStage.idle,
+      message: 'Preparing slot-filling model...',
+    );
+    _initFuture = _initialize();
+  }
+
   /// Extract parameters from a voice transcript given a matched action.
   ///
   /// Returns null if required parameters could not be extracted.
@@ -165,9 +175,7 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
       }
 
       if (p.enumValues.isNotEmpty) {
-        paramDefs.writeln(
-          '  allowed values: ${p.enumValues.join(", ")}',
-        );
+        paramDefs.writeln('  allowed values: ${p.enumValues.join(", ")}');
       }
       if (p.minimum != null || p.maximum != null) {
         final bounds = <String>[];
@@ -321,53 +329,66 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
     final totalSw = Stopwatch()..start();
     try {
       debugPrint('SlotFillingNotifier: starting initialization...');
-      _setState(const SlotFillingState(
-        stage: SlotFillingStage.loading,
-        message: 'Initializing slot-filling runtime...',
-      ));
+      _setState(
+        const SlotFillingState(
+          stage: SlotFillingStage.loading,
+          message: 'Initializing slot-filling runtime...',
+        ),
+      );
 
       final runtimeSw = Stopwatch()..start();
       await FlutterGemma.initialize();
       runtimeSw.stop();
-      unawaited(logger.logModelLoad(
-          'slot_filling.runtime_init', runtimeSw.elapsedMilliseconds));
+      unawaited(
+        logger.logModelLoad(
+          'slot_filling.runtime_init',
+          runtimeSw.elapsedMilliseconds,
+        ),
+      );
 
       // Check if model is already installed.
       final hasActiveSw = Stopwatch()..start();
       final hasActive = FlutterGemma.hasActiveModel();
       hasActiveSw.stop();
-      unawaited(logger.logModelLoad(
-          'slot_filling.has_active_check', hasActiveSw.elapsedMilliseconds));
+      unawaited(
+        logger.logModelLoad(
+          'slot_filling.has_active_check',
+          hasActiveSw.elapsedMilliseconds,
+        ),
+      );
       if (hasActive) {
-        debugPrint(
-            'SlotFillingNotifier: model already installed, loading...');
-        _setState(const SlotFillingState(
-          stage: SlotFillingStage.loading,
-          message: 'Loading Qwen3 from cache...',
-        ));
+        debugPrint('SlotFillingNotifier: model already installed, loading...');
+        _setState(
+          const SlotFillingState(
+            stage: SlotFillingStage.loading,
+            message: 'Loading Qwen3 from cache...',
+          ),
+        );
       } else {
         // Download from HuggingFace.
-        _setState(const SlotFillingState(
-          stage: SlotFillingStage.downloading,
-          message: 'Downloading Qwen3 0.6B...',
-          progress: 0,
-        ));
+        _setState(
+          const SlotFillingState(
+            stage: SlotFillingStage.downloading,
+            message: 'Downloading Qwen3 0.6B...',
+            progress: 0,
+          ),
+        );
 
         debugPrint('SlotFillingNotifier: downloading model from $modelUrl');
         await FlutterGemma.installModel(
           modelType: ModelType.qwen,
           fileType: ModelFileType.litertlm,
-        )
-            .fromNetwork(modelUrl)
-            .withProgress((pct) {
+        ).fromNetwork(modelUrl).withProgress((pct) {
           if (pct % 5 == 0) {
             debugPrint('SlotFillingNotifier: download $pct%');
           }
-          _setState(SlotFillingState(
-            stage: SlotFillingStage.downloading,
-            message: 'Downloading Qwen3 0.6B... $pct%',
-            progress: pct / 100,
-          ));
+          _setState(
+            SlotFillingState(
+              stage: SlotFillingStage.downloading,
+              message: 'Downloading Qwen3 0.6B... $pct%',
+              progress: pct / 100,
+            ),
+          );
         }).install();
       }
 
@@ -375,8 +396,12 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
       final openSw = Stopwatch()..start();
       final model = await FlutterGemma.getActiveModel(maxTokens: 512);
       openSw.stop();
-      unawaited(logger.logModelLoad(
-          'slot_filling.model_open', openSw.elapsedMilliseconds));
+      unawaited(
+        logger.logModelLoad(
+          'slot_filling.model_open',
+          openSw.elapsedMilliseconds,
+        ),
+      );
 
       if (_disposed) {
         // A dispose happened while awaiting the model — don't leak it.
@@ -385,26 +410,38 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
       }
 
       debugPrint('SlotFillingNotifier: model loaded successfully!');
-      _setState(SlotFillingState(
-        stage: SlotFillingStage.ready,
-        message: 'Qwen3 ready',
-        model: model,
-      ));
+      _setState(
+        SlotFillingState(
+          stage: SlotFillingStage.ready,
+          message: 'Qwen3 ready',
+          model: model,
+        ),
+      );
       totalSw.stop();
-      unawaited(logger.logModelLoad(
-          'slot_filling.total', totalSw.elapsedMilliseconds,
-          extra: {'path': hasActive ? 'cache_hit' : 'downloaded'}));
+      unawaited(
+        logger.logModelLoad(
+          'slot_filling.total',
+          totalSw.elapsedMilliseconds,
+          extra: {'path': hasActive ? 'cache_hit' : 'downloaded'},
+        ),
+      );
     } catch (error, stackTrace) {
       debugPrint('SlotFillingNotifier: failed to initialize: $error');
       debugPrint('SlotFillingNotifier: $stackTrace');
-      _setState(SlotFillingState(
-        stage: SlotFillingStage.failed,
-        message: 'Slot-filling model failed: $error',
-      ));
+      _setState(
+        SlotFillingState(
+          stage: SlotFillingStage.failed,
+          message: 'Slot-filling model failed: $error',
+        ),
+      );
       totalSw.stop();
-      unawaited(logger.logModelLoad(
-          'slot_filling.total', totalSw.elapsedMilliseconds,
-          extra: {'path': 'failed'}));
+      unawaited(
+        logger.logModelLoad(
+          'slot_filling.total',
+          totalSw.elapsedMilliseconds,
+          extra: {'path': 'failed'},
+        ),
+      );
       _initFuture = null;
     }
   }
@@ -431,5 +468,5 @@ class SlotFillingNotifier extends Notifier<SlotFillingState> {
 /// Riverpod provider that exposes the [SlotFillingNotifier] and its state.
 final slotFillingProvider =
     NotifierProvider<SlotFillingNotifier, SlotFillingState>(
-  SlotFillingNotifier.new,
-);
+      SlotFillingNotifier.new,
+    );
