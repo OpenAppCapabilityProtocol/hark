@@ -38,8 +38,12 @@ class EmbeddingCacheStore {
       final content = await file.readAsString();
       final json = jsonDecode(content) as Map<String, dynamic>;
 
-      // Model ID mismatch → entire cache invalid (different model produces
-      // different vectors).
+      // Version or model ID mismatch → entire cache invalid.
+      if (json['version'] != 1) {
+        debugPrint('EmbeddingCacheStore: unknown cache version '
+            '${json['version']}, invalidating');
+        return {};
+      }
       if (json['model_id'] != modelId) {
         debugPrint('EmbeddingCacheStore: model_id mismatch, invalidating '
             'cache (cached=${json['model_id']}, current=$modelId)');
@@ -74,6 +78,7 @@ class EmbeddingCacheStore {
     final path = await _getCachePath();
     final tmpPath = '$path.tmp';
     final json = {
+      'version': 1,
       'model_id': modelId,
       'created': DateTime.now().toIso8601String(),
       'entry_count': cache.length,
