@@ -58,31 +58,31 @@ Status: `[ ]`
 - [ ] Eliminate Android system beep on listen start
 - [ ] Enable true continuous listening without system STT limitations
 
-### 4. Model Loading Performance — llamadart migration
+### 4. Model Loading Performance — measurement + decision in progress
 
 Status: `[-]`
 
-Replace `flutter_embedder` (ORT, no mmap, synchronous main-isolate load) and `flutter_gemma` (MediaPipe, plugin teardown on Activity detach) with a single `llamadart` dependency. llamadart ships mmap-by-default, isolate-based inference, explicit hot-restart handling, and a first-class embedding API tested with EmbeddingGemma as its default example. Migration deletes two plugins instead of forking one and gets every architectural property we'd otherwise build ourselves for free.
+Before the overlay ships, cold start needs to feel instant. The original plan here was a hard llamadart migration. Slice 0 (the quantization benchmark harness) ran and produced a concrete verdict (see [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md)):
+- **EmbeddingGemma 300M Q8_0 via llamadart**: clean win. 3.7s cold load + 150ms embed on Moto G56, quality identical to ONNX baseline.
+- **Qwen3 0.6B Q8_0 via llamadart for slot filling**: hardware-bound on mid-range Android. 27-30s per case on the Moto G56 CPU. The bottleneck is compute on prompt processing, not memory bandwidth, so no quant trick breaks the wall. Slot-filling migration is killed.
 
-Gated on a quantization benchmark (Slice 0) that picks the Q4_K_M / Q5_K_M / Q8_0 sweet spot per model empirically instead of guessing.
+The remaining question is whether the **current `flutter_embedder` + `flutter_gemma` stack** is faster, slower, or about the same as the measured llamadart numbers. We don't have clean comparison numbers yet. Until we do, the migration decision is on pause.
 
-- [ ] Slice 0 — Quantization benchmark harness: `tools/quant_bench/` CLI, 20-case embedding gold set + 15-case slot-filling gold set, matrix over 3 quants × 2 models, decision table in `docs/plans/llamadart-quant-benchmark.md`
-- [ ] Slice 1 — Baseline instrumentation (before): Stopwatch-wrapped `HarkLoadPerf` logs around current load path, device numbers in `docs/plans/llamadart-migration-baseline.md`
-- [ ] Slice 5 — Keyword / alias fast-path: zero-parameter commands (flashlight, pause, scan) dispatch during splash before models load
-- [ ] Slice 2 — Migrate `EmbeddingNotifier` from `flutter_embedder` → `llamadart`
-- [ ] Slice 3 — Migrate `SlotFillingNotifier` from `flutter_gemma` → `llamadart` (skipped if Slice 0 falls back to embedder-only)
-- [ ] Slice 4 — Warm engine via `HarkApplication.onCreate()` + `keepAliveMain` Dart entrypoint
-- [ ] Slice 6 — Re-measure on-device, update baseline doc with before/after columns
-- [ ] Slice 7 — Flip this item to done, unblock Assistant Overlay (#5), open PR
+**Near-term plan** (replaces the old 7-slice breakdown):
 
-Full plan: [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md).
+- [x] Slice 0 — Quantization benchmark harness (`tools/quant_bench/`), 20-case embedding gold set, 15-case slot-filling gold set, v3 quant matrix, decision findings in [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md). Shipped.
+- [x] Instrumentation — Stopwatch-wrapped timing around the current load path, logs to `model_load_logs/load_*.jsonl`. Shipped as the `f213e36` commit (reusable for both runtimes).
+- [x] Keyword / alias fast-path — zero-parameter commands (flashlight, pause, scan) dispatch without touching the slot-filling LLM. Shipped as the `2efe65d` commit.
+- [-] **Phase 1 — Comparative measurement**: run the same bench harness (or a flutter_gemma fork of it) against the current stack on Moto G56. Produce a comparison table with concrete numbers for every cell. Write up `docs/plans/load-time-baseline.md`.
+- [ ] **Phase 2 — Migration decision + load-time optimization**: based on Phase 1 data, migrate the embedder to llamadart (if clearly faster), keep the current slot filler (per Slice 0 findings), and land load-time optimizations (parallel init, persistent action embedding cache, warm engine retention). See `.claude/plans/async-twirling-galaxy.md` for the full phased plan.
 
-**Why this is #4**: Before we ship the overlay, cold start needs to feel instant. Earlier iteration of this plan proposed forking `flutter_embedder` to add mmap + a static session cache. Deep research found `llamadart` already has all of that, plus 20+ chat templates, hot-restart safety, isolate-based backend, and prebuilt native binaries via Dart's `hook/build.dart`. Migration is smaller and safer than forking.
+**Deferred**: slot-filling migration to llamadart is killed per Slice 0 findings. Smaller quants (Q4_0, Qwen2.5-0.5B Q4_K_M) were tested and don't break the hardware wall. The slot-filling workstream re-opens only if a future runtime introduces a working GPU/NPU delegate for mid-range Android.
 
-**Deferred as Phase-4 follow-ups**:
-- Precompute capability embeddings at registry-refresh time
-- Switch embedding model family (all-MiniLM-L6-v2 / e5-small-v2) — only if Q8_0 fails the quality gate
-- Fork `llamadart` (not needed unless we hit an upstream gap)
+**Research preserved**:
+- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md) — Track 2 research on encoder-based slot tagging as a non-LLM alternative. Parked for v2 vision.
+- [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md) — original 7-slice plan, preserved for historical context.
+
+**Why this is #4**: Before the overlay ships, cold start needs to feel instant. Measurement first, optimization second, migration only if the data supports it.
 
 ### 5. Assistant Overlay
 
