@@ -6,7 +6,9 @@
 
 **Purpose**: produce the data that Phase 2 uses to decide whether to migrate the embedder + slot filler from `flutter_embedder` + `flutter_gemma` to `llamadart`. The decision is pre-committed to the data via the migration rules (§Migration rules below).
 
-**Headline finding**: the right answer is **split** — migrate the embedder to llamadart (Rule 1 fires), keep the current flutter_gemma slot filler (Rule 3 effectively fires because LiteRT's XNNPack CPU kernels are materially faster per inference than llama.cpp's CPU path on this hardware). The Slice 0 "hardware-bound 28s ceiling" finding was really about llama.cpp's specific implementation, not the hardware — LiteRT demonstrates the CPU can go faster.
+**Headline finding (original)**: the raw performance data pointed to a split migration — migrate the embedder to llamadart (Rule 1 fires, ~5s faster cold load), keep the current flutter_gemma slot filler (Rule 3 effectively fires, LiteRT's XNNPack CPU kernels are ~1.8× faster per inference than llama.cpp's CPU path on this hardware). The Slice 0 "hardware-bound 28s ceiling" was really about llama.cpp's implementation, not the hardware — LiteRT demonstrates the CPU can go faster.
+
+**Headline finding (revised 2026-04-10 after user decision)**: **no migration.** Stay on `flutter_embedder` AND `flutter_gemma`. Rule 1 technically fires on the embedder, but the user decided the ~5s cold-load improvement is not worth the cost: a format-change migration (ONNX → GGUF) forces a one-time 313 MB re-download for every existing user because GGUF is not compatible with the cached ONNX file, and `flutter_embedder` already has mature in-built ONNX caching that the migration would replace with hand-rolled Dart code. The revised verdict keeps both runtimes untouched and focuses Phase 2b optimization work on load-time wins that don't require changing the runtime. See §Migration decision at the bottom for the full reasoning.
 
 ---
 
@@ -181,34 +183,24 @@ Possible outcomes after applying the rules:
 
 ---
 
-## Migration decision — locked 2026-04-10
+## Migration decision — revised 2026-04-10
 
-Applying the migration rules from §Migration rules above against the measured numbers:
+### Phase 1 raw-data analysis (as measured)
 
-### Embedder: MIGRATE to llamadart
+Applying the migration rules from §Migration rules above against the measured numbers, the raw data pointed to a split migration: migrate the embedder (Rule 1 fires, current is ~5s slower), keep the slot filler (Rule 3 effectively fires, current is ~1.8× faster per inference). That analysis is preserved below for completeness.
 
-**Rule 1 fires.** Current embedder cold load is 8672 ms vs llamadart's 3691-4149 ms — **~4.5-5.0 seconds slower**, well over the 1-second threshold. Quality is bit-identical between the two per Slice 0 findings (EmbeddingGemma Q8_0 produces the same 100% top1 / 95% top3 / 83% disamb / 5/5 exact-match numbers on both runtimes on this phone).
+#### Raw data — embedder comparison
 
-**Additional wins beyond cold load**:
-- Query-time resolve+rank: current ~300-650ms vs llamadart estimated ~200-250ms. ~200-400ms per command saved.
-- Unified native stack: removes `flutter_embedder` as a runtime dependency, aligns with the eventual target of one native inference plugin (even if flutter_gemma stays).
-- Mature ONNX → GGUF path: GGUF models are better-maintained in the open-source ecosystem and Qwen/ggml-org are first-party publishers.
+- Current embedder cold load: 8672 ms
+- llamadart embedder cold load: 3691-4149 ms
+- Delta: ~4.5-5.0 s slower on current, well over the 1 s Rule 1 threshold
+- Quality: bit-identical per Slice 0
 
-**Cost of migration**:
-- Must add `android:extractNativeLibs="true"` to `AndroidManifest.xml` (per Slice 0 findings — mandatory for ggml backend plugin discovery on Android).
-- +20-35 MB APK size from llama.cpp + CPU variant backends.
-- Must wire native log routing through `LlamaEngine.configureLogging` so ggml stderr lands in the Dart logger (reusable code pattern from `tools/quant_bench/lib/bench/bench_runner.dart`).
-- Must set `preferredBackend: GpuBackend.cpu` explicitly — llamadart's `GpuBackend.auto` on Android silently picks CPU anyway, and Vulkan on Mali-G57 crashes per Slice 0.
+#### Raw data — slot filler comparison
 
-### Slot filler: STAY on flutter_gemma + LiteRT-LM
-
-**Rule 3 effectively fires** — not because of a GPU/NPU delegate, but because LiteRT's XNNPack CPU kernels are materially faster per inference than llama.cpp's CPU path on this hardware. The spirit of Rule 3 ("current stack has a working acceleration path that breaks the llamadart ceiling") applies:
-
-- **llamadart Slice 0 per-case wall time**: 27-30 seconds (15-case average)
-- **Current stack per-inference**: 13.7-16.6 seconds, mean ~15.2s (3 data points)
-- **Current stack is ~1.8× faster per inference**
-
-This is counterintuitive — llamadart cold-inits ~2.3× faster (5.5-7s vs 16.4s) but loses the per-inference race. For any session where the user issues more than one slot-fill command, current stack wins net:
+- llamadart Slice 0 per-case wall time: 27-30 s (15-case average)
+- Current stack per-inference: 13.7-16.6 s, mean ~15.2 s (3 data points)
+- Current stack is ~1.8× faster per inference
 
 | Commands per session | llamadart total | Current stack total | Winner |
 |---|---|---|---|
@@ -217,40 +209,69 @@ This is counterintuitive — llamadart cold-inits ~2.3× faster (5.5-7s vs 16.4s
 | 5 | ~147 s | ~91 s | **current by 56 s** |
 | 10 | ~287 s | ~166 s | **current by 121 s** |
 
-The typical Hark user almost certainly issues more than one command per session once the app is open. Current stack wins decisively for realistic usage.
+The Slice 0 "hardware-bound 28s ceiling" finding was really about `llama.cpp`'s implementation — its CPU matmul kernels on ARMv8.2 are slower than XNNPack's for this workload. The hardware is capable of ~15s per case on the current stack. Still not interactive territory (a target of <5s would require another 3× improvement) but 1.8× better than the Slice 0 ceiling.
 
-**Reinterpreting the Slice 0 finding**: Slice 0 concluded that slot-filling on Moto G56 was "hardware-bound at ~28s per case, no quant trick breaks the wall". That conclusion was specifically about llama.cpp's implementation — it's compute-bound on prompt processing, and llama.cpp's CPU matmul kernels on ARMv8.2 are slower than XNNPack's for this workload. **The hardware is capable of ~15s per case on current stack**, which is still too slow for truly interactive use but 1.8× better than the Slice 0 ceiling. This is not "interactive" territory (a target of <5s would require another 3× improvement), but it's close enough that additional wins from Phase 2b optimizations (persistent KV cache, shorter prompts, lazy slot-fill for zero-param commands) could plausibly push it into the acceptable zone.
+### Final decision — no migration, revert Phase 2a
 
-### Summary of the split decision
+After reviewing the raw-data analysis above, the user decided **not to migrate the embedder** either. The Phase 2a migration work (pubspec changes, new `GgufModelManager`, `EmbeddingNotifier` rewrite, `extractNativeLibs=true` in the manifest, and `dio` as a new dep) was drafted and then reverted in the same session.
 
-| Component | Decision | Rationale | Phase 2a work |
-|---|---|---|---|
-| **Embedder** | **Migrate to llamadart** | Rule 1 — ~5s faster cold load, quality identical | Swap `EmbeddingNotifier` from `flutter_embedder` to `llamadart`, change model to GGUF, add `extractNativeLibs=true`, wire native log routing |
-| **Slot filler** | **Stay on flutter_gemma** | Rule 3 — LiteRT XNNPack CPU kernels are ~1.8× faster per inference; current stack wins any multi-command session despite slower cold init | No changes. Remove Slice 3 from the original 7-slice migration plan. |
+**Reasoning for the revert** (from the user decision):
 
-This split means Phase 2a migration work is focused: only the embedder changes. The `flutter_gemma` dependency stays, `SlotFillingNotifier` is untouched, the slot-fill pipeline is unchanged.
+1. **Format-change re-download is painful for existing users.** `llamadart` needs GGUF; `flutter_embedder` caches ONNX. The two formats are not interchangeable, so any user with the app already installed would have to re-download ~313 MB on upgrade. `flutter_embedder`'s existing cache is completely wasted. This is worse than a normal version bump where the same file works after updating.
+2. **`flutter_embedder` already has mature in-built caching.** Its `ModelManager.withDefaultCacheDir()` handles model download, cache checks, atomic writes, and restore-on-restart — all of which we'd have to re-implement in hand-rolled Dart code (a new `GgufModelManager` + a `dio` dependency). The migration replaces a working, tested caching layer with a less-tested one written from scratch.
+3. **The ~5s cold-load win doesn't justify the disruption.** The faster cold load is a real improvement, but it's a one-time-per-launch cost that users would trade for a one-time re-download + a new caching implementation that has fewer battle-test reps than `flutter_embedder`'s.
+4. **Phase 2b optimizations are runtime-agnostic.** Parallel init, persistent action embedding cache, warm-engine retention — all of these work on the existing `flutter_embedder` stack and deliver measurable wins without touching the runtime. The total load-time improvement from Phase 2b alone is likely to be comparable to the migration's ~5s, without any of the upgrade friction.
+
+**Revised verdict — both runtimes stay**:
+
+| Component | Decision | Rationale |
+|---|---|---|
+| **Embedder** | **STAY on `flutter_embedder`** | Migration replaces mature in-built caching with new hand-rolled code and forces a format-change re-download on upgrade. The ~5s cold-load win is not worth the disruption + reimplementation risk. Phase 2b optimizations will deliver comparable wins on the existing runtime. |
+| **Slot filler** | **STAY on `flutter_gemma`** | Rule 3 — LiteRT XNNPack CPU kernels are ~1.8× faster per inference than llama.cpp's CPU path; current stack wins any multi-command session. |
+
+**Phase 2a scope update**: Phase 2a is now **"no migration, focus on Phase 2b optimizations directly"**. The `feat/llamadart-migration` branch stays alive because it has the Slice 0 bench tool + findings docs that should merge to main eventually, but it will not contain a runtime migration. Renaming the branch is not necessary — the name is slightly misleading now, but that's a cosmetic issue.
+
+### New direction — persistent model backup + adb side-load (proposed)
+
+The user raised two related ideas during the revert discussion that are worth capturing as a future improvement — orthogonal to which runtime is underneath:
+
+1. **After first download, copy the model files to a publicly-addressable persistent location** (like the Android `Downloads/` directory) so that if the user accidentally clears app storage or reinstalls, the next launch can restore from the backup instead of re-downloading ~313-610 MB. This applies to both flutter_embedder's ONNX cache and flutter_gemma's LiteRT-LM cache.
+2. **Contributor documentation for `adb push`** so anyone building Hark from source on their own device can skip the model download entirely — push the files to the expected cache locations via `adb shell run-as` (the Slice 0 bench already uses this pattern for `com.oacp.hark.quant_bench`).
+
+Both of these are **future work**, not part of Phase 2. See `docs/plans/persistent-model-backup.md` (to be drafted in a future session) for the full design. The sketch:
+
+- Android permissions: need `MANAGE_EXTERNAL_STORAGE` or scoped-storage MediaStore API to write to public Downloads/. The existing `WRITE_EXTERNAL_STORAGE` with `maxSdkVersion="28"` only covers pre-Android-10 devices.
+- Backup directory: `Downloads/hark-models/<runtime>/<model-file>` — scoped to Hark but visible to the user.
+- Restore logic: on first launch after cache is empty, check `Downloads/hark-models/` before falling back to HuggingFace download. Verify file size or checksum before using.
+- Contributor docs: a new `docs/dev/local-model-setup.md` explaining the adb push workflow for builders who want to skip the download. This should point at the specific private-storage paths that `flutter_embedder` and `flutter_gemma` use, plus an explanation of the `run-as` stream-pipe workflow from Slice 0.
+- Privacy consideration: the backup directory is user-visible in the Files app, which is the right affordance — users can delete it, copy it to another phone, share it with friends on the same hardware who also use Hark.
+
+This direction preserves the "always-on-device" spirit of Hark, improves first-install UX for contributors, and gives users a way to recover from "clear app storage" without a 1 GB re-download. None of that requires migrating runtimes.
 
 ---
 
 ## What happens next
 
-1. **Phase 2a — embedder migration** starts on the `feat/llamadart-migration` branch. Concrete steps are in the decision table above. Expected effort: S to M. Measurable outcome: `embedding.total` drops from 8672 ms to ~3700 ms on Moto G56, plus the secondary wins from llamadart's faster query-time ranking.
-2. **Phase 2b — load-time optimizations** runs after (or in parallel with) 2a. These are runtime-agnostic and apply to both the new llamadart embedder and the kept flutter_gemma slot filler:
-   - Parallel model init (`Future.wait([embeddingInit, slotFillingInit])` in `InitNotifier`) — currently the two models likely init sequentially. With parallelization the total init is `max(embedding, slot_filling)` instead of `sum`. On current numbers that's `max(8672, 16816) = 16816` instead of `17760` — ~1 second saved. Post-migration with llamadart embedder that becomes `max(3700, 16816) = 16816` — slot filler is now clearly the bottleneck, but embedder savings still compound with optimization 3.
-   - Persistent action embedding cache keyed by `(model_id, action_id, action_doc_hash)`. On subsequent cold starts, skip the document-embedding pass entirely. Expected win: multiple seconds on warm restart.
-   - Warm engine retention via a minimal foreground service (if needed). Measure whether flutter_gemma + llamadart engines release on Activity pause/stop, and decide whether the retention service is worth the complexity.
-   - Tokenizer cache persistence if it turns out to be a meaningful chunk of init time.
+Phase 2a is **done** — the decision is "no migration, stay on both runtimes". No lib code changes landed in Phase 2a. The work now proceeds directly to Phase 2b (load-time optimizations that apply to the existing runtimes).
+
+1. **Phase 2a — COMPLETE (no migration)**. The `feat/llamadart-migration` branch already contains: Slice 0 bench tool, findings doc, vision doc, encoder survey, and this baseline doc. It does NOT contain a runtime migration — that was drafted and reverted in the same session after the user's decision. The branch name is slightly misleading now but doesn't need renaming.
+2. **Phase 2b — load-time optimizations** begins now. Runtime-agnostic — applies to both `flutter_embedder` and `flutter_gemma` on the existing stack:
+   - **Parallel model init** via `Future.wait([embeddingInit, slotFillingInit])` in `InitNotifier`. Currently the two models likely init sequentially. With parallelization the total init becomes `max(embedding, slot_filling)` instead of `sum`. On Phase 1 numbers that's `max(8672, 16816) = 16816 ms` instead of `17760 ms` — ~1 second saved.
+   - **Persistent action embedding cache** keyed by `(model_id, action_id, action_doc_hash)`. On subsequent cold starts, skip the document-embedding pass entirely. Expected win: multiple seconds on warm restart.
+   - **Warm engine retention** via a minimal foreground service (if needed). Measure whether `flutter_embedder` and `flutter_gemma` engines release on Activity pause/stop, decide whether the retention service is worth the complexity.
+   - **Tokenizer cache persistence** if it turns out to be a meaningful chunk of init time.
+   - **Persistent model backup to `Downloads/hark-models/`** (see §New direction below) — protects users from "clear app storage" wiping the 1 GB of model files.
 3. **Phase 3 — splash UX** branches off main after Phase 2 exit merge. The splash UX work is valuable regardless of what runtimes are under it.
 4. **Phase 4 — overlay** follows.
 5. **Wake word** is a separate planning session after Phase 4.
 
-Phase 2 exit merges the `feat/llamadart-migration` branch to main. The merge is a mix of:
+Phase 2 exit merges the `feat/llamadart-migration` branch to main. The merge is now:
 - Slice 0 bench tool + findings doc + encoder survey + this baseline doc (from Phase 0)
 - Vision doc (from Phase 5 paperwork)
-- Phase 2a embedder migration (from this decision)
+- ~~Phase 2a embedder migration~~ — reverted per user decision, nothing to merge for this item
 - Phase 2b optimizations
 
-After that merge, the branch is deleted (migration complete in scoped form) and subsequent phases branch off main.
+After that merge, the branch is deleted (its purpose is fulfilled even without a migration). Subsequent phases branch off main.
 
 ---
 
