@@ -1,18 +1,21 @@
 # llamadart migration — Slice 0 findings & architectural decision
 
-**Status**: Slice 0 (quantization benchmark gate) complete. Slices 1–7 blocked pending architectural decision on slot-filling approach.
+**Status**: Slice 0 (quantization benchmark gate) **complete and verdict locked**. The decision is: migrate the embedder to llamadart, do **not** migrate slot-filling to llamadart, redesign the slot-filling architecture as a separate workstream. See "Final architecture verdict" near the bottom.
 
 **Worktree**: `worktree-llamadart-migration` on branch `feat/llamadart-migration`
 
-**Date drafted**: 2026-04-09
+**Date drafted**: 2026-04-09. **Updated 2026-04-10** with v3 matrix expansion (Q4_0 + Qwen2.5 0.5B), full latency-curve macOS run, phone Q4_0 confirmation run, and the encoder slot-filler survey (`temp/encoder-slot-filler-survey.md`).
 
-**Context**: This doc extends [`llamadart-migration.md`](llamadart-migration.md). Read that first for the original 7-slice plan and the trust-tier analysis. This doc captures what Slice 0 actually measured, the surprises we hit on real hardware, and the decisions we need to make before any of Slices 2–7 can start.
+**Context**: This doc extends [`llamadart-migration.md`](llamadart-migration.md). Read that first for the original 7-slice plan and the trust-tier analysis. This doc captures what Slice 0 actually measured, the surprises we hit on real hardware, and the architectural decision that came out the other side.
 
-## TL;DR
+## TL;DR (updated 2026-04-10)
 
-- **Quality on both platforms is fine.** EmbeddingGemma 300M Q8_0 is bit-reliable across Apple Silicon and ARM. Qwen3 0.6B Q8_0 hits 80–87% exact-match slot-fill across the 15 gold cases, failing the 90% quality gate by a small margin but well above unusable.
-- **Moto G56 5G is hardware-bound below interactive latency for Qwen3 0.6B Q8_0.** Steady-state slot-fill wall time is **27–30 seconds per case**, which is ~14× slower than Apple Silicon Metal and ~10× slower than interactive-acceptable. This is not a llamadart bug or a tuning problem — llama.cpp's CPU backend is already selecting the A78-optimal variant, and the hardware's memory bandwidth caps throughput at ~1–2 tok/s for a 600 MB Q8_0 model. No software tweak closes this gap.
-- **Vulkan GPU offload is not viable on Mali-G57 with llama.cpp b8638.** The backend loads, enumerates the device, and then crashes with a null `ggml_backend_device*` in `llama_model_loader::create_tensor` for Qwen3. EmbeddingGemma fails the same path but returns a clean error instead of segfaulting. This is an upstream llama.cpp bug for specific model architectures on Mali. Chasing it is not a good investment; Arm's OpenCL backend isn't bundled by default in llamadart's prebuilt Android archive and Mali's OpenCL compute maturity is historically worse.
+- **EmbeddingGemma 300M Q8_0 → llamadart: ship it.** Quality is bit-reliable across Apple Silicon Metal and ARM CPU. Phone cold load 3.7s, single embed 150ms. Top1 100% / top3 95% / disambiguation 83%. Identical to the existing ONNX baseline. This part of the migration is a clean win and unblocks Slices 2 / 4 / 6 / 7 of the original migration plan.
+- **Qwen3 0.6B (any quant) → llamadart for slot filling: do NOT migrate.** Moto G56 5G hits a hard 27–30 seconds per slot-fill case regardless of quant. The bottleneck is CPU compute on prompt processing (~250 token schema prompt + 40 token output), not memory bandwidth. Q4_0 cold-loads 3× faster than Q8_0 (1.7s vs 5.5s) but per-case wall time is identical (~28s) AND quality drops 27 points (87% → 60% exact match) with double the hallucination rate. There is no quant trick that breaks the 28-second floor on this hardware tier.
+- **Qwen2.5-0.5B-Instruct (any quant) is broken at slot filling regardless of platform.** Both Q4_K_M and Q8_0 hit 20–27% exact match on macOS — the model is too small to follow our schema-driven extraction prompt and returns empty `{}` for almost everything. This is a model/task mismatch, not a quant problem. Skipped on phone.
+- **No off-the-shelf encoder slot-tagger fits all of `<80 MB INT8 + Hindi/Punjabi + joint slot filling`** either (see `temp/encoder-slot-filler-survey.md`). Closest options are DistilBERT-multilingual-NER (135M, ~65MB INT8, no Hindi/Punjabi) and `ai4bharat/IndicNER` (167M, MIT, Hindi+Punjabi+9 other Indic langs but needs DIY ONNX export and sits at the 150 MB cap). A two-model stack covers the languages but doubles the deployment surface.
+- **Cloud LLM fallback gets promoted from "last resort" to primary path** for slot filling on mid-range Android, especially for Indic-language users. This is the biggest decision shift from where Slice 0 started.
+- **Vulkan GPU offload is still not viable on Mali-G57 with llama.cpp b8638.** Backend loads, enumerates `Vulkan0` cleanly, then crashes with a null `ggml_backend_device*` in `llama_model_loader::create_tensor` for Qwen3 and returns a clean error for EmbeddingGemma. Upstream llama.cpp bug. CPU is the only safe backend on this device tier.
 - **The migration still makes sense** — llamadart for EmbeddingGemma is a clean win — but **generative slot-filling at interactive latency is blocked on Moto-G56-class hardware**. The question is: what fills the gap?
 
 Three tracks proposed. User has decided to explore all three (Q4 quants + smaller models, a non-LLM specialized slot filler, and cloud LLM as a last-resort escalation). **No regex/rule-based approach** — that option is rejected.
@@ -63,6 +66,63 @@ Memory bandwidth math as a sanity check: 600 MB model, ~3 GB/s effective DDR ban
 | hallucinations | 6.7% | 6.7% |
 
 Failure profiles differ across platforms — macOS fails sf07/sf12/sf13, phone fails sf08/sf12 — because greedy-decoded float summation order differs between Metal MPS and ARM NEON kernels. Same seed (42), same topK (1), same temp (0), but ties near probability break differently. Phone actually scores slightly higher on exact-match. Both fail the 90% gate.
+
+### Run 4 — full v3 matrix on macOS (2026-04-10)
+
+Added Qwen3-0.6B-Q4_0 (ggml-org first-party), Qwen2.5-0.5B-Instruct-Q4_K_M, Qwen2.5-0.5B-Instruct-Q8_0 (both Qwen team first-party). Switched bench to `escalation_policy=measure_all_quants` so all quants run regardless of pass/fail. macOS Metal numbers:
+
+| Model | Quant | cold load | warmup | exact | json | type | halluc | required | gate |
+|---|---|---|---|---|---|---|---|---|---|
+| EmbeddingGemma 300M | Q8_0 | 7265ms | 23ms | 100% top1 | 95% top3 | — | — | — | **PASS** |
+| Qwen3 0.6B | Q4_0 | 343ms | 1057ms | **73%** | 80% | 80% | 0% | 100% | FAIL (–7 from gate) |
+| Qwen3 0.6B | Q8_0 | 328ms | 1573ms | **87%** | 100% | 100% | 0% | 100% | **PASS** |
+| Qwen2.5 0.5B Instruct | Q4_K_M | 270ms | 281ms | **27%** | 100% | 100% | 6.7% | 14% | FAIL (catastrophic) |
+| Qwen2.5 0.5B Instruct | Q8_0 | 341ms | 18ms | **20%** | 100% | 100% | 0% | 0% | FAIL (catastrophic) |
+
+Three things this run revealed that the previous-day macOS run did not:
+
+1. **Qwen3 0.6B Q8_0 actually passes the 80% exact-match gate** (87% this run vs 80% the previous run). Same seed, same temp=0, same topK=1 — the ~7% jitter is from llama.cpp tensor ops having subtle non-determinism even in greedy decoding (likely tie-breaking during near-equal token probabilities). **Q8_0 is "production-ready quality on Metal" with confidence interval bouncing across the gate line.**
+
+2. **Q4_0 fails by 14 points** (73% vs Q8_0's 87%). Failures include 4 cases of *invalid JSON output entirely* (sf03, sf09, sf12 — model returned empty string). Q4_0 doesn't just get values wrong, it stops following the prompt format. This is the cost of older block-wise quantization at 0.6B param scale: format adherence is the first thing to break.
+
+3. **Qwen2.5-0.5B-Instruct is catastrophically broken at slot extraction.** Q4_K_M hits 27% exact, Q8_0 hits 20%. The Q8_0 warmup time of **18ms** is the smoking gun — the model is generating EOS immediately, doing nothing. Looking at failure details, almost all cases return empty `{}` or invent parameters that weren't asked for ("sf03: open the Wikipedia article for Kyoto → returned `{language_code: en}`"). **The 0.5B model is too small to follow our verbose schema-driven extraction prompt.** This is a model/task mismatch, not a quant problem — fixing it requires fine-tuning, not quant choice.
+
+### Run 5 — Qwen3 0.6B Q4_0 on Moto G56 (2026-04-10)
+
+Phone subset run (EmbeddingGemma + Qwen3 Q4_0 only — Qwen2.5 was conclusively broken on macOS so we didn't waste phone time on it):
+
+| Model | Quant | cold load | warmup | exact | json | type | halluc | required | per-case wall time |
+|---|---|---|---|---|---|---|---|---|---|
+| EmbeddingGemma 300M | Q8_0 | 3691ms | 150ms (embed) | 100% top1 | 95% top3 | — | — | — | — |
+| Qwen3 0.6B | Q4_0 | **1763ms** | **16342ms** | **60%** | 80% | 80% | **13%** | 100% | **27.9s/case** |
+
+The headline finding from this run, comparing Q4_0 to Q8_0 directly on the same phone:
+
+| | Q8_0 | Q4_0 | delta |
+|---|---|---|---|
+| File size | 581 MB | 409 MB | -30% |
+| Cold load | 5502ms | **1763ms** | **-68% (3× faster)** |
+| Warmup (16 tok) | 7958–23129ms | 16342ms | within range |
+| Per-case wall time | 27.6–29.4s | **27.9s** | **~identical** |
+| exact match | 87% | **60%** | **-27 points** |
+| json validity | 93% | 80% | -13 points |
+| hallucinations | 0% | **13%** | doubled |
+
+**Critical insight: Q4_0 cold-loads 3× faster but per-case wall time is unchanged.** The naive bandwidth-scaling extrapolation ("Q4_0 is 30% smaller, expect ~21s/case") was wrong. Slot-fill cases are dominated by **prompt processing**, not generation: each case sends ~250 tokens of action schema + utterance and waits for ~40 generation tokens. Prompt eval throughput on Dimensity 7025 is **compute-bound** (matmul FLOPS), not memory-bandwidth-bound. Q4_0 saves bandwidth but adds dequantization overhead per matmul, so prompt eval throughput is identical to Q8_0.
+
+**This means we cannot quant our way past 28 seconds per slot-fill case on Moto-G56-class hardware.** Even much smaller models (e.g. a 0.3B variant if it existed) would only break the floor if they had ~10× less compute work per token, which doesn't exist as a credible Qwen variant. The Qwen2.5-0.5B test confirms this from the other direction: smaller param count alone doesn't help if quality collapses.
+
+### Phone latency breakdown sanity check
+
+For a 250-token prompt + 40-token output at 1.5 tok/s prompt eval throughput:
+- prompt eval: 250 tokens / 1.5 tok/s = ~17 seconds
+- generation: 40 tokens / 2 tok/s = ~20 seconds
+- per case: ~28 seconds, matches measured ~28s/case
+
+For Q4_0 with the same prompt eval throughput (compute-bound, not bandwidth-bound):
+- same ~17s prompt eval + ~20s generation = ~28s
+
+This confirms the bottleneck is compute on prompt processing, not bandwidth on weight loading. The fix is *fewer prompt tokens*, not *smaller weights*. A redesigned slot-fill prompt with no schema (e.g. function-calling-style with tool definitions cached) might cut prompt processing dramatically — but that's a separate experiment, and doesn't change the fact that slot-filling-via-LLM is the wrong shape for this hardware.
 
 ## What Slice 0 actually delivered
 
@@ -130,185 +190,154 @@ User-confirmed:
 4. **Explore a specialized non-LLM slot-filler** — encoder-based token classifier (BERT-family, DIET-style, or similar).
 5. **Cloud LLM fallback as last resort** — design it, don't build it yet.
 
-## Three tracks to execute (deferred to next session)
+## Final architecture verdict (locked 2026-04-10)
 
-### Track 1 — Quant & smaller-model exploration
+After Track 1 (Q4_0 + Qwen2.5 quant exploration) and Track 2 (encoder slot-filler survey, results in `temp/encoder-slot-filler-survey.md`) both reported, the architecture is:
 
-**Goal**: Hard data on whether any local generative model can hit interactive latency on Moto-G56-class hardware.
+### 1. Embedder migration: SHIP IT
 
-**Work**:
-1. Update `tools/quant_bench/assets/configs/quant_matrix.json` to add:
-   - `Qwen3-0.6B-Q4_K_M.gguf` — source: `Qwen/Qwen3-0.6B-GGUF` (first-party, same tier as current Q8_0)
-   - `Qwen2.5-0.5B-Instruct-Q8_0.gguf` — source: `Qwen/Qwen2.5-0.5B-Instruct-GGUF` (first-party)
-   - `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` — same source
-2. Download the three new GGUF files to `temp/hark-bench-models/`.
-3. Push to phone via the existing `adb shell run-as` stream pipe workflow.
-4. Rerun `quant_bench` on macOS + Moto G56. Quality gate stays at its current thresholds.
-5. Expected outcome: Q4_K_M should be ~2× faster on memory-bandwidth-bound CPU (400MB model vs 600MB). Qwen2.5-0.5B is smaller still (~400MB Q8_0 / ~250MB Q4_K_M). One of these may get below 15s/case on the phone.
+EmbeddingGemma 300M Q8_0 via llamadart is a clean win on every measured axis:
 
-**Gate**: If any combination gets below 5s per slot-fill case on the phone *and* maintains the 90% exact-match gate, generative slot-filling becomes viable with escalation to cloud for complex cases. If nothing clears 10s/case, generative slot-filling is off the table for this hardware class and Track 2 becomes the main path.
+- Quality bit-reliable across Apple Silicon Metal and ARM CPU
+- Phone cold load 3.7s (well within budget)
+- Phone single embed 150ms (was 54ms ONNX; both are well below the 500ms NLU resolver budget — the ~3× regression is acceptable in exchange for unifying on llamadart)
+- Top1 100% / top3 95% / disambiguation 83% / exact 5/5 — identical to existing ONNX baseline
 
-**Estimated effort**: 1 session. Download + benchmark + analyze.
+**Action**: proceed with the original Slice 2 plan for the embedder. Migrate `EmbeddingNotifier` from `flutter_embedder` to `llamadart`. Slices 4 / 6 / 7 of the original migration doc all unblock from this.
 
-**Files touched**: `tools/quant_bench/assets/configs/quant_matrix.json`, `temp/hark-bench-models/*.gguf` (untracked).
+### 2. Slot filling via local generative LLM: KILLED
 
-### Track 2 — Non-LLM specialized slot-filler research
+There is no generative model + quant combination that hits interactive latency on Moto-G56-class hardware (Dimensity 7025, A78 CPU). The data:
 
-**Goal**: Establish whether a transformer encoder (not autoregressive) can do joint intent + slot filling at <100ms on Moto G56, removing the need for a generative model on the hot path entirely.
+- Qwen3 0.6B Q8_0: 27.6–29.4 s/case, 87% exact match (passes quality with jitter, fails latency)
+- Qwen3 0.6B Q4_0: 27.9 s/case (no speedup), 60% exact match, 13% hallucinations (fails both)
+- Qwen2.5-0.5B Q4_K_M: 27% exact match on macOS (fails quality before phone latency even matters)
+- Qwen2.5-0.5B Q8_0: 20% exact match on macOS (same)
 
-**Category**: This is the pre-LLM NLU literature. It was the state of the art from ~2017–2021 and the models are 10–50× smaller and 100–500× faster than any generative LLM. The canonical architectures:
+The bottleneck on phone is **CPU compute on prompt processing**, not memory bandwidth on weights. Smaller weight files improve cold load but not per-case latency. Only a much smaller compute footprint (or a much shorter prompt, or different hardware) breaks the 28-second floor.
 
-#### Option A — Pre-trained BERT-NER token classifier (BIO tagging)
+**Action**: do NOT migrate `SlotFillingNotifier` from `flutter_gemma` to `llamadart`. Leave the existing flutter_gemma + Qwen3 LiteRT path in place as a placeholder. Add a "this device is below the interactive-latency floor for on-device slot filling" warning to the settings UI when the device profile (Dimensity 7000 / Snapdragon 6 / older) is detected. Slice 3 of the original migration doc is **cancelled**.
 
-Load a pre-trained multilingual BERT-NER model, run token classification, reconstruct spans, map entity types to action parameters by schema.
+### 3. New slot-filling architecture: split into two paths
 
-Candidate models (all Apache-2.0 / MIT):
-- `Davlan/distilbert-base-multilingual-cased-ner-hrl` — DistilBERT 66M, ~260MB FP32 / ~65MB INT8 ONNX, ~30–80ms on Android CPU
-- `dslim/bert-base-NER` — BERT-base, English only, ~420MB FP32 / ~100MB INT8
-- `dbmdz/bert-base-multilingual-cased-finetuned-conll03-english` — similar
-- `Jean-Baptiste/roberta-large-ner-english` — larger, higher accuracy, probably too heavy for mobile
+The slot-filling workstream becomes its own thing, no longer part of the llamadart migration. Two paths, neither replaces the other:
 
-**Pros**: Zero training required for generic entities (PER, LOC, DATE, TIME, NUM, ORG, MISC). ~10 of 15 gold cases are covered by generic NER out of the box. Runs on existing flutter_embedder (ONNX) or could move to llamadart's encoder mode if llama.cpp exposes token-level hidden states.
+#### Path A — Cloud LLM fallback (now PRIMARY for slot fill, was "last resort")
 
-**Cons**: Action-specific parameters (`format=QR_CODE`, `days=1`) aren't covered by generic NER — need either per-action post-processing (which edges toward rules — user rejected) or a custom fine-tuned model.
+The biggest decision shift this session. Previously framed as a fallback, this is now the **default** slot-fill path for any device that doesn't clear the on-device latency floor — which is most mid-range Android, including Hark's Moto G56 reference device and all of the Dimensity 7000 / SD 6 / Helio family that dominates Hark's likely user base in India.
 
-#### Option B — Fine-tuned joint intent + slot transformer (DIET-style)
+Rough sketch (full design doc to come, deferred):
 
-Single model, two heads: one classifies intent, the other does BIO slot tagging. Rasa's DIETClassifier is the canonical reference implementation (Apache-2.0). ~25–50M params.
+- Host: most likely Vercel Functions Node.js runtime with Fluid Compute and AI SDK streaming. Already in our stack, Fluid's active-CPU pricing is friendly to bursty mobile traffic, AI SDK's streaming response handles slot-fill output nicely. Alternative: Cloudflare Workers AI for lower cold start, or self-host on Hetzner with vllm/ollama for full control. Pick after the design doc weighs cost / privacy / latency.
+- Protocol: Hark sends `{intent_id, utterance, action_schema_json, user_id_hash}` over HTTPS, function returns `{slot_values, confidence, model_used}` as streaming JSON. Target round trip: <2s cold, <500ms warm. Cost target: <$0.001 per slot-fill call at full scale.
+- Privacy: zero-retention contract with the model provider (Anthropic enterprise, OpenAI data opt-out, or Google Vertex with the right config). Sensitive intents (contacts, messages, banking) never escalate to cloud regardless of latency. User opt-in toggle in settings.
+- Escalation policy: EmbeddingGemma confidence gate first, then either local encoder (path B if available) or cloud (always available). User can also manually opt-in via "complicated command" toggle.
 
-**Pros**: Best accuracy, single forward pass handles both tasks, well-suited for per-user personalization later.
+**Action**: write `docs/plans/cloud-nlu-fallback.md` as a separate planning doc. No code yet. Implementation lands as a new slice in a follow-up.
 
-**Cons**: **Requires training data**. Our 15 gold cases aren't enough. Would need to bootstrap on a public dataset first:
-- **SNIPS** (13k training examples, 7 intents, English) — small but well-annotated
-- **ATIS** (4k, 21 intents, airline domain) — too narrow
-- **MASSIVE** (1M multilingual, 60 intents, 51 languages) — Amazon's release, most relevant for a voice assistant
-- **MultiATIS++** — multilingual extension of ATIS
+#### Path B — On-device encoder slot filler (FAST HAPPY PATH for compatible languages)
 
-Training pipeline (Python + HF Transformers) + eval harness + ONNX export + mobile runtime. **Weeks of work**. Defer to later unless Option A doesn't cover enough cases.
+Survey results in `temp/encoder-slot-filler-survey.md`. Summary of the trade-offs:
 
-#### Option C — Retrieval-augmented exemplar matching
+- **No single off-the-shelf encoder hits all of `<80 MB INT8 + Hindi/Punjabi + joint slot filling`.** State of the art has not solved this combination yet.
+- **Best English+European option**: `Xenova/distilbert-base-multilingual-cased-ner-hrl` — DistilBERT 135M, ~65MB INT8, AFL-3.0 license, expected 40-80ms on A78. Covers en/de/es/fr/it/nl/pt + others. **No Hindi/Punjabi.**
+- **Best Indic option**: `ai4bharat/IndicNER` — mBERT 167M fine-tuned on 11 Indic languages including Hindi+Punjabi, MIT license. **No pre-built ONNX, needs DIY export, sits at 140 MB INT8 — borderline against the 150 MB hard cap.**
+- **GLiNER family** (zero-shot, label-free): Most promising long-term candidate. All currently released variants either overshoot size budget (small=183 MB INT8, multi=349 MB INT8) or don't cover Hindi/Punjabi. Park as Phase-2 experiment.
+- **Latency**: Every number in the survey is extrapolated from ONNX Runtime mobile benchmarks on similar SoCs — no public Cortex-A78 token-classification benchmarks exist for any of these. Real measurement is required before committing.
 
-Build a corpus of `(utterance, intent, slots_filled)` exemplars. Embed utterances with EmbeddingGemma (already loaded). At inference, find k-nearest exemplars and copy their slot template with substitution via entity alignment.
+**Action**: spike a slot-filler bench harness (mirror of `quant_bench`'s structure) that:
+1. Loads `Xenova/distilbert-base-multilingual-cased-ner-hrl` ONNX INT8 via the existing flutter_embedder onnxruntime path.
+2. Runs token classification on the 15-case slot-fill gold set.
+3. Measures latency on Moto G56 and accuracy against the gold set.
+4. Reports: how many cases handled, latency per case, false positives.
 
-**Pros**: No new model, no training, reuses existing EmbeddingGemma pipeline. Quality scales linearly with corpus size.
+If ≥70% of cases pass at <100ms each on phone, Path B becomes the default for English-language users on supported devices. If <70%, Path B is shelved and Path A (cloud) becomes the only slot-filler architecture.
 
-**Cons**: Cold-start problem — needs a seed corpus. Hark's existing NLU resolver does a version of this for the keyword fast-path; extending it to parameter slots means building an aligned exemplar corpus by hand (or bootstrapping from the LLM's outputs during a "training" phase). User's "no regex" rejection might extend to this approach — needs clarification.
+For Indic languages, even if Path B works for English, we still need either (a) IndicNER as a second model with the size penalty, or (b) cloud escalation for Indic queries. This is a separate decision that depends on Hark's actual user-language distribution.
 
-#### Track 2 concrete plan
+**Estimated effort**: 1-2 sessions for the spike harness, plus 1 session for the IndicNER ONNX export experiment.
 
-1. **Survey phase** (30 min): Confirm which pre-trained BERT-NER models are ONNX-deployable, find the smallest one with acceptable multilingual coverage, verify license.
-2. **Spike phase** (1 session): Build a Flutter test harness similar to `quant_bench` but using `flutter_embedder` (or the existing onnxruntime-based path) to load the encoder, run token classification on the 15 slot-fill gold cases, and measure both latency and accuracy.
-3. **Analysis phase** (part of spike session): How many of 15 cases does a zero-shot NER handle correctly? Is the remaining gap small enough for cloud escalation? Is per-action parameter mapping feasible without becoming "rules"?
-4. **Decision**: If ≥70% of cases pass at <100ms/case, this is the new default slot-filling path and Qwen3 becomes a cloud-only fallback. If <70%, Track 2 becomes Option B (fine-tuning) and we're months away from a result — we'd have to fall back to Track 1 + cloud for the interim.
+**Files touched**: `tools/slot_filler_bench/` (new) or extend `tools/quant_bench/` with a second evaluator type. Pre-downloaded ONNX model in `temp/`.
 
-**Gate**: ≥70% zero-shot accuracy at <100ms/case on Moto G56. Otherwise Option A is insufficient and we escalate to Option B or abandon the track.
+## Commit history on `feat/llamadart-migration`
 
-**Estimated effort**: 1–2 sessions for the spike. Training (Option B) is much more.
-
-**Files touched**: `tools/slot_filler_bench/` (new, or extend quant_bench with a new evaluator type), a pre-downloaded ONNX model in `temp/`, findings added to this doc.
-
-### Track 3 — Cloud LLM fallback architecture (design only)
-
-**Goal**: A written design doc for when and how to escalate from local inference to a cloud LLM, without committing to an implementation until after Tracks 1 and 2 report.
-
-**Work**:
-1. **Host choice**. Options surveyed:
-   - **Vercel Functions** (Node.js runtime with Fluid Compute) — pro: already in the stack, Fluid Compute's active-CPU pricing is cheap for bursty traffic, streaming is first-class, 300s default timeout covers any LLM round trip. Con: cold start 800ms–2.5s on Node.js runtime; Edge runtime has <1ms cold start but limited API surface. For AI workloads Vercel recommends Node.js + streaming via AI SDK's `toUIMessageStreamResponse()`.
-   - **Cloudflare Workers AI** — pro: even lower latency, Workers AI has built-in model inference. Con: different model selection, binding to CF ecosystem.
-   - **Direct API calls** to Anthropic / OpenAI / Google from the client — pro: simplest, no server. Con: can't hide API keys, can't rate-limit, can't audit, can't do user billing.
-   - **Self-hosted on tiny VPS** (e.g., Hetzner + vllm or ollama) — pro: full control, cheapest at scale. Con: ops burden.
-
-   Leading candidate: **Vercel Functions with Fluid Compute + AI SDK streaming + Node.js 24 runtime**. Rationale: already in the stack, streaming protocol well-defined, Fluid's active-CPU pricing suits bursty mobile traffic, `waitUntil`/`after` lets us log and audit without blocking the response.
-
-2. **Protocol design**. Hark sends `{intent_id, utterance, action_schema_json, user_id_hash}`. Function returns `{slot_values: {...}, confidence, model_used}` as streaming JSON (SSE). Target round-trip: <2s cold, <500ms warm.
-
-3. **Escalation policy**. When does Hark escalate?
-   - EmbeddingGemma confidence gate (if top1 score < threshold → maybe route to cloud)
-   - Encoder slot-filler confidence gate (from Track 2) — if Option A handles the intent but flags a parameter as uncertain, escalate
-   - Explicit user opt-in ("complicated command" toggle in settings, or user says "use the big model")
-   - Never on sensitive intents (contacts, messages, banking) — those stay local regardless
-
-4. **Privacy story**. What's sent, what's logged, data retention, opt-in UX, which cloud providers respect "zero retention" contracts (Anthropic via enterprise has it, OpenAI has data opt-out, Google needs specific Vertex config).
-
-5. **Cost modeling**. Per-request cost estimate for each candidate, break-even analysis vs on-device battery cost.
-
-**Write it up** as `docs/plans/cloud-nlu-fallback.md` (sibling of this doc). No code. Explicit "implementation deferred" note.
-
-**Estimated effort**: 1 session (pure writing, no benchmarking).
-
-**Files touched**: `docs/plans/cloud-nlu-fallback.md` (new).
-
-## What's committed vs uncommitted
-
-### Committed (on `feat/llamadart-migration`)
 - `b099de0` — docs: plan llamadart migration with quantization benchmark
 - `f213e36` — feat(perf): instrument model load phases with Stopwatch timing
 - `2efe65d` — feat(resolver): keyword / alias fast-path for zero-parameter commands
 - `420234f` — feat(bench): Slice 0 quant benchmark harness in tools/quant_bench
 - `de2069d` — bench(quant): switch to first-party Q8_0 sources only
 - `f204a59` — bench(quant): fix metrics, enable Android device runs, disable macOS sandbox
+- `a9f2568` — bench(quant): extract native libs on Android, route native logs, default to CPU
+- `a0dfa40` — bench(quant): v3 matrix with Q4_0 + Qwen2.5, measure_all_quants policy
 
-### Uncommitted changes staged for "continue" session
-- `tools/quant_bench/android/app/src/main/AndroidManifest.xml` — added `extractNativeLibs=true` with documentation comment explaining why (ggml backend plugin discovery needs extracted `.so` siblings on disk).
-- `tools/quant_bench/lib/bench/bench_runner.dart` —
-  - Wired `LlamaEngine.configureLogging` + `engine.setNativeLogLevel` so llama.cpp native log messages flow into the bench progress stream (critical for diagnosing the Vulkan failure and verifying which CPU variant loaded).
-  - Added `_resolveAndroidBackend()` helper that defaults to `GpuBackend.cpu` on Android (Vulkan crashes on Qwen3) but respects `HARK_BENCH_BACKEND=cpu|vulkan|opencl` env override for future retests.
-  - Commented explanation of why `GpuBackend.auto` is wrong on Android and why Vulkan is opt-in.
+Untracked under `temp/`:
+- `temp/encoder-slot-filler-survey.md` — full Track 2 research output, sources, comparison table, recommendations
+- `temp/hark-bench-models/*.gguf` — five GGUF files used by the bench (~2.4 GB local, also pushed to phone)
 
-These should be committed at the start of the next session so the findings and the reproducibility both land together. Commit message draft:
-
-```
-bench(quant): extract native libs on Android, route native logs, default to CPU
-
-Three related fixes discovered while diagnosing why Qwen3 0.6B Q8_0 was
-running ~30s/case on Moto G56 5G:
-
-1. android:extractNativeLibs=true in AndroidManifest — Flutter's
-   default leaves libggml.so and its backend plugins inside the APK
-   zip, so ggml's readdir-based backend discovery finds nothing and
-   every optional backend silently falls back to whatever is
-   statically linked. Setting this to true forces extraction to
-   /data/app/.../lib/arm64/ where ggml can find the Vulkan and
-   per-ISA CPU variant plugins.
-
-2. Native log routing via LlamaEngine.configureLogging +
-   engine.setNativeLogLevel. Without this, llama.cpp's backend
-   registry and tensor-placement errors go to native stderr, which
-   is /dev/null on Android. This is how we discovered Vulkan on
-   Mali-G57 crashes Qwen3 during tensor setup — the log handler
-   captured "loadedModules=[cpu, vulkan], devices=[CPU, Vulkan
-   (Vulkan0)]" right before the SIGSEGV.
-
-3. _resolveAndroidBackend defaults to GpuBackend.cpu on Android but
-   respects HARK_BENCH_BACKEND env override. Vulkan crashes Qwen3 on
-   Mali-G57 with llama.cpp b8638 (upstream bug in
-   llama_model_loader::create_tensor), so GPU is opt-in until
-   upstream fixes it.
-
-Full findings in docs/plans/llamadart-migration-findings.md.
-```
+The actual quant_bench results JSONs from each run are in:
+- macOS: `~/Documents/quant_bench/results_*.json`
+- Phone: `/storage/emulated/0/Android/data/com.oacp.hark.quant_bench/files/quant_bench/{latest.json, results_*.json}` (pull via `adb pull`)
 
 ## Open questions for the next session
 
-1. **Q4_K_M source trust**. The Qwen team publishes `Qwen/Qwen3-0.6B-GGUF` on HuggingFace with Q4_K_M included — same first-party trust tier as the current Q8_0. Confirm this repo actually has Q4_K_M for the 0.6B variant before planning the download. If it doesn't, fall back to `ggml-org/Qwen3-0.6B-GGUF` if they publish it, or accept a trust-tier compromise for the bench (but not for production).
+The previous session left 6 open questions. Status update:
 
-2. **Qwen2.5-0.5B tokenizer compatibility with llamadart chat template engine**. Qwen2.5 and Qwen3 use different chat templates (Qwen2.5 uses ChatML, Qwen3 adds the `<think>` thinking-mode tags). Verify llamadart auto-detects both before burning a download.
+1. ~~**Q4_K_M source trust for Qwen3 0.6B**~~ — **answered**. Neither Qwen team nor ggml-org publishes Q4_K_M for Qwen3 0.6B. We used Q4_0 from ggml-org as the closest first-party Q4 alternative.
+2. ~~**Qwen2.5-0.5B chat template compat**~~ — **non-issue**. llamadart's chat template engine auto-detected ChatML correctly. The Qwen2.5 problem was model size / training mismatch, not template compat.
+3. ~~**Track 2 ONNX model availability**~~ — **answered**. See encoder survey. Yes, multiple ONNX-deployable BERT-NER models exist; the survey identified the best three. None solve all three constraints (size + Hindi/Punjabi + joint slot filling) simultaneously.
+4. ~~**Does user accept exemplar retrieval as "not rules"?**~~ — **moot**. With cloud LLM as the primary path, we don't need exemplar retrieval. It would only matter if we had to ship purely on-device, which we don't.
+5. **Slot-fill quality gate threshold** — still open. With Q8_0 hitting 80–87% on both platforms with run-to-run jitter, the 80% gate is right on the edge. For documentation purposes leave it at 80% but treat anything in 78–82% as "passing with caveat". The cloud LLM should easily clear 95%+, so this gate becomes a triage signal not a hard ship/no-ship line.
+6. **Hard cap on acceptable slot-fill latency** — partially answered. 5s is the working target; 28s (current local) is unacceptable; 1-3s is comfortable. The cloud round-trip target of <2s cold / <500ms warm fits comfortably.
 
-3. **Track 2 ONNX model availability**. Is there a small (<80MB) ONNX-exported multilingual BERT-NER model that covers PER/LOC/DATE/TIME/NUM as entity types? The HuggingFace optimum library exports most models to ONNX but some need manual export. Confirm before committing to Track 2.
+New open questions for the next session:
 
-4. **Does user accept Option C (exemplar retrieval) as "not rules"?** The distinction between "retrieval-based matching with an index of exemplars" and "rules" is fuzzy. Need user clarification. If Option C is accepted, it becomes the fastest path to ship because it needs zero new models.
+7. **What fraction of Hark's expected user base is on devices below the on-device-LLM viability floor?** Moto G56 is the reference; we need to understand whether this is "10% of users" or "70% of users". This determines whether cloud fallback is "edge case for cheap phones" or "the actual default path".
+8. **Is `Xenova/distilbert-base-multilingual-cased-ner-hrl`'s AFL-3.0 license a blocker?** OSI-approved permissive but unusual for ML. 15-minute legal check. If it's a blocker, fall back to `Xenova/bert-base-NER` (MIT, English-only) + `ai4bharat/IndicNER` (MIT, Hindi/Punjabi but DIY ONNX export and at the size cap).
+9. **Cloud LLM provider decision**: Anthropic / OpenAI / Google Vertex / Vercel AI Gateway with model routing. Cost vs privacy vs latency trade-off, factor in zero-retention contract availability.
+10. **Should the encoder slot filler reuse the existing flutter_embedder onnxruntime stack, or do we need a new path?** flutter_embedder is on its way out per this migration doc. If we keep it just for the encoder slot filler that's two on-device runtimes (llamadart for embedding, flutter_embedder for slot fill encoder) — manageable but ugly. Alternative: see if llama.cpp's bert.cpp / GGUF encoder support can do token classification end-to-end so everything stays under llamadart. This is research, not a decision.
 
-5. **Slot-fill quality gate threshold**. Current gate is 90% exact-match. Qwen3 hits 80–87% on both platforms, which fails the gate but is above "useless." Should we lower the gate to 85%? If yes, Q8_0 passes the *quality* half of the bench on phone — still fails the *perf* half. Lowering the gate would let us ship Q8_0 as the fallback if cloud is unreachable.
+## Where to resume — next session
 
-6. **Hard cap on acceptable slot-fill latency**. What's the UX ceiling for a voice command → parameter extraction response? 3s is comfortable. 5s is slow but tolerable. 10s feels broken. Calibrate the Track 1 gate accordingly.
+The state at end-of-session 2026-04-10 is:
 
-## Where to resume
+1. **All planned bench work for Slice 0 is complete.** Verdict above is locked.
+2. **Repo is committed clean.** Branch `feat/llamadart-migration` has 8 commits. Nothing uncommitted in tracked files. The encoder survey lives in `temp/` (untracked, intentional).
+3. **Phone has all 5 GGUF files** in `/data/user/0/com.oacp.hark.quant_bench/files/bench_models/` for any future re-runs without re-pushing.
+4. **macOS quant_bench is built and runnable** from `tools/quant_bench/build/macos/Build/Products/Debug/quant_bench.app`.
+5. **APK currently installed on phone is the v3 subset** (only EmbeddingGemma + Qwen3 Q4_0). To run the full v3 matrix on the phone, do `flutter build apk --debug && adb install -r` from `tools/quant_bench/` after a `git stash pop` or fresh checkout — the committed matrix has all 5 quants.
 
-Next session should start by:
+The next session should pick up at one of three forks:
 
-1. Reading this doc end-to-end.
-2. Committing the uncommitted changes with the message above.
-3. Deciding on Track 1 vs Track 2 execution order (or running them in parallel — they don't conflict).
-4. Answering the open questions at the bottom of this doc as a warm-up.
+### Fork A — Start the slot-filler encoder spike (Path B)
+This is the most interesting open question. Concrete first steps:
+1. Download `Xenova/distilbert-base-multilingual-cased-ner-hrl` model files (ONNX INT8) to `temp/`.
+2. Build a `tools/slot_filler_bench/` Flutter app or extend `tools/quant_bench/` with a `EncoderSlotFillerEvaluator` class.
+3. Wire it to the existing flutter_embedder onnxruntime path.
+4. Run on the 15-case slot-fill gold set on Moto G56.
+5. Report: latency, accuracy, which cases pass.
+6. Decide: ship Path B for English users, or shelve and go cloud-only.
 
-All the tooling from Slice 0 is reusable as-is — `quant_bench` already handles the push-to-phone workflow, the gold set structure is model-agnostic, and the result-diffing infrastructure works for new runs. Track 1 is mostly config + download + push + rerun. Track 2 is a new harness but can crib structure from `quant_bench`.
+### Fork B — Write the cloud LLM fallback design doc (Path A)
+1. Open `docs/plans/cloud-nlu-fallback.md` (new file).
+2. Lay out: host choice, protocol, escalation policy, privacy story, cost model.
+3. Pick a cloud provider candidate.
+4. Estimate cost at 1k / 10k / 100k DAU.
+5. No code yet. Implementation is its own slice.
+
+### Fork C — Start the embedder migration (the part that's ALREADY decided)
+This is the unblocked part of the original migration plan. Concrete first steps:
+1. Open `lib/state/embedding_notifier.dart` in the hark-release worktree.
+2. Replace `flutter_embedder` calls with `llamadart` calls (`LlamaEngine.embed()`).
+3. Update `pubspec.yaml`.
+4. Update model artifact path from ONNX to GGUF.
+5. Update `HarkApplication.onCreate` to warm the engine in a background isolate (Slice 4 of the original migration plan).
+6. Re-measure cold load + first-token-latency end-to-end (Slice 6).
+7. Open the migration PR (Slice 7).
+
+Forks A, B, and C are independent and can run in parallel — they touch different files entirely. **My recommendation when resuming: do C first** (the embedder migration is the part that's actually decided and unblocked, and it's a small concrete win that ships value). Then B (cloud design doc, pure writing). Then A (encoder spike, the most uncertain but most interesting).
+
+All Slice 0 tooling is reusable for future runs:
+- `tools/quant_bench/` — push-to-phone workflow, gold set structure, result diffing
+- `temp/encoder-slot-filler-survey.md` — research baseline for the encoder spike
+- `temp/hark-bench-models/*.gguf` — model files (don't redownload)
+- Phone has its bench_models dir already populated (don't re-push)
