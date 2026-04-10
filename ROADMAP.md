@@ -156,3 +156,17 @@ These are intentionally deferred:
 - Multi-intent utterances ("set an alarm and turn off the lights")
 - NPU/backend optimization before the inference provider layer is stable
 - Wake word before assistant overlay is done
+
+---
+
+## Long-term vision
+
+Hark's long-term direction is an **agent architecture** with memory, routines, ambient sensing, multi-turn conversation, and interruption handling — capable of running multi-step automations like "start the work drive" and handling interruptions like an incoming call pausing music and resuming after.
+
+That architecture is the right long-term direction but intentionally deferred until the near-term foundation (fast load times, polished splash UX, floating overlay, wake word) is solid. Full research, first-principles toolbox, layered architecture, scenario walkthroughs, and pre-mortem are preserved in:
+
+- [`docs/vision/hark-v2-agent-architecture.md`](docs/vision/hark-v2-agent-architecture.md) — the complete vision doc.
+- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md) — research on encoder-based slot tagging as a non-LLM alternative for on-device parameter extraction.
+- [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md) — the hardware benchmark findings that shaped the vision (local generative slot filling is hardware-bound at ~28 s/case on mid-range Android; cloud or encoder NER are the viable paths).
+
+The v2 architecture is a hypothesis, not a commitment. It will be reconsidered once the near-term plan ships and there is real shipping data from Hark v1 about what users actually do.
