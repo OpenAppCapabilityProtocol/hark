@@ -119,6 +119,12 @@ class SplashScreen extends ConsumerWidget {
                           message: init.failureMessage ?? 'Unknown error',
                           onRetry: () =>
                               ref.read(initProvider.notifier).retryAll(),
+                          isDegraded: init.isDegraded,
+                          onContinueDegraded: init.isDegraded
+                              ? () => ref
+                                    .read(initProvider.notifier)
+                                    .acceptDegraded()
+                              : null,
                         )
                       : Text(
                           init.isReady
@@ -331,10 +337,14 @@ class _FailurePanel extends StatelessWidget {
     super.key,
     required this.message,
     required this.onRetry,
+    this.isDegraded = false,
+    this.onContinueDegraded,
   });
 
   final String message;
   final VoidCallback onRetry;
+  final bool isDegraded;
+  final VoidCallback? onContinueDegraded;
 
   @override
   Widget build(BuildContext context) {
@@ -359,8 +369,25 @@ class _FailurePanel extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         Center(
-          child: FButton(onPress: onRetry, label: const Text('Retry')),
+          child: FButton(onPress: onRetry, child: const Text('Retry')),
         ),
+        if (isDegraded && onContinueDegraded != null) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: FButton(
+              onPress: onContinueDegraded!,
+              variant: FButtonVariant.outline,
+              child: const Text('Continue in limited mode'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Simple commands will work. Commands needing '
+            'parameter extraction will be unavailable.',
+            textAlign: TextAlign.center,
+            style: typography.xs.copyWith(color: colors.mutedForeground),
+          ),
+        ],
       ],
     );
   }

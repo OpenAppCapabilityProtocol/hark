@@ -18,6 +18,7 @@ import '../services/stt_service.dart';
 import '../services/tts_service.dart';
 import 'chat_state.dart';
 import 'embedding_notifier.dart';
+import 'init_notifier.dart';
 import 'registry_provider.dart';
 import 'resolver_provider.dart';
 import 'services_providers.dart';
@@ -702,6 +703,11 @@ class ChatNotifier extends Notifier<ChatState> {
 
     // Then slot-filling model status.
     if (slotState.stage == SlotFillingStage.failed) {
+      // In degraded mode, show a warning but allow simple commands.
+      final init = ref.read(initProvider);
+      if (init.isDegraded && init.degradedAccepted) {
+        return 'Limited mode — simple commands only';
+      }
       return slotState.message;
     }
     if (slotState.isBusy) {
