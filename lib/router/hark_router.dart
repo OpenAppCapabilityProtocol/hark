@@ -41,6 +41,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final init = ref.read(initProvider);
       final atSplash = state.matchedLocation == HarkRoutes.splash;
 
+      // Normal splash → chat transition.
       if (atSplash && init.canProceed) {
         return HarkRoutes.chat;
       }

@@ -1,113 +1,60 @@
 package com.oacp.hark
 
-import android.app.role.RoleManager
 import android.content.Intent
-import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import com.oacp.hark_platform.HarkMainApi
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
-import io.flutter.plugin.common.EventChannel
-import io.flutter.plugin.common.MethodChannel
 
+/**
+ * Main Activity hosting the full Hark chat UI.
+ *
+ * Uses the cached main [FlutterEngine] and registers [HarkMainApi] for
+ * Activity-bound operations (opening system settings).
+ */
 class MainActivity : FlutterActivity() {
 
     override fun provideFlutterEngine(context: android.content.Context): FlutterEngine? {
-        // Reuse the pre-warmed engine from HarkApplication so the overlay
-        // session and the activity share the same Dart isolate.
-        return FlutterEngineCache.getInstance().get(HarkApplication.ENGINE_ID)
+        return FlutterEngineCache.getInstance().get(HarkApplication.MAIN_ENGINE_ID)
     }
-    private val resultReceiver = OacpResultReceiver()
-    private var assistChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(
+        HarkMainApi.setUp(
             flutterEngine.dartExecutor.binaryMessenger,
-            "com.oacp.hark/discovery",
-        ).setMethodCallHandler(OacpDiscoveryHandler(applicationContext))
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.oacp.hark/local_model_storage",
-        ).setMethodCallHandler(LocalModelStorageHandler(applicationContext))
-        EventChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.oacp.hark/results",
-        ).setStreamHandler(resultReceiver)
+            MainApiHandler(),
+        )
 
-        assistChannel = MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.oacp.hark/assist",
-        ).also { channel ->
-            channel.setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "openAssistantSettings" -> {
-                        openAssistantSettings()
-                        result.success(null)
-                    }
-                    "isDefaultAssistant" -> {
-                        result.success(isDefaultAssistant())
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-        }
-
-        resultReceiver.register(applicationContext)
-        checkAssistLaunch(intent)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        checkAssistLaunch(intent)
-    }
-
-    private fun checkAssistLaunch(intent: Intent?) {
-        if (intent == null) return
-
-        val isAssist = intent.action == Intent.ACTION_ASSIST
-            || intent.getBooleanExtra(HarkSession.EXTRA_LAUNCHED_FROM_ASSIST, false)
-
-        if (isAssist) {
-            intent.removeExtra(HarkSession.EXTRA_LAUNCHED_FROM_ASSIST)
-            assistChannel?.invokeMethod("startListening", null)
-        }
-    }
-
-    private fun isDefaultAssistant(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-            if (roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true) {
-                val viService = Settings.Secure.getString(
-                    contentResolver, "voice_interaction_service"
-                )
-                return viService != null && viService.contains(packageName)
-            }
-            return false
-        }
-        val assistant = Settings.Secure.getString(contentResolver, "assistant")
-        return assistant != null && assistant.contains(packageName)
-    }
-
-    private fun openAssistantSettings() {
-        try {
-            startActivity(Intent("android.settings.VOICE_INPUT_SETTINGS"))
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not open voice input settings", e)
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
-            } catch (e2: Exception) {
-                Log.w(TAG, "Could not open default apps settings", e2)
-            }
-        }
+        Log.i(TAG, "HarkMainApi registered")
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        resultReceiver.unregister()
-        assistChannel = null
-        super.cleanUpFlutterEngine(flutterEngine)
+        HarkMainApi.setUp(flutterEngine.dartExecutor.binaryMessenger, null)
+        Log.i(TAG, "HarkMainApi torn down")
+    }
+
+    // ── HarkMainApi implementation ───────────────────────────────
+
+    private inner class MainApiHandler : HarkMainApi {
+        override fun openAssistantSettings() {
+            try {
+                startActivity(
+                    Intent("android.settings.VOICE_INPUT_SETTINGS")
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not open voice input settings", e)
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                    )
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Could not open any settings activity", e2)
+                }
+            }
+        }
     }
 
     companion object {

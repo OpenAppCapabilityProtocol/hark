@@ -2,9 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 
+import 'overlay_main.dart' as overlay;
 import 'router/hark_router.dart';
-import 'services/overlay_controller.dart';
 import 'theme/hark_theme.dart';
+
+// Force the compiler to include overlay_main.dart in the kernel snapshot.
+// Without this, the secondary Dart entrypoint can't be resolved at runtime.
+@pragma('vm:entry-point')
+final _overlayEntry = overlay.overlayMain;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,10 +21,6 @@ class HarkApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Eagerly initialize the overlay bridge so the native
-    // VoiceInteractionSession can communicate with Dart immediately.
-    ref.read(overlayControllerProvider);
-
     final theme = buildHarkTheme();
     final router = ref.watch(goRouterProvider);
     return MaterialApp.router(

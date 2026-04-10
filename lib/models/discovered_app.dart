@@ -1,3 +1,5 @@
+import 'package:hark_platform/hark_platform.dart';
+
 class DiscoveredApp {
   final String packageName;
   final String authority;
@@ -26,6 +28,18 @@ class DiscoveredApp {
       manifestJson: map['manifestJson'] as String?,
       contextMarkdown: map['contextMarkdown'] as String?,
       error: map['error'] as String?,
+    );
+  }
+
+  factory DiscoveredApp.fromMessage(DiscoveredAppMessage msg) {
+    return DiscoveredApp(
+      packageName: msg.packageName,
+      authority: msg.authority,
+      appLabel: msg.appLabel,
+      versionName: msg.versionName,
+      manifestJson: msg.manifestJson,
+      contextMarkdown: msg.contextMarkdown,
+      error: msg.error,
     );
   }
 

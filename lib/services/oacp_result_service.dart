@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
+import 'package:hark_platform/hark_platform.dart';
 
 class OacpResult {
   const OacpResult({
@@ -30,28 +30,41 @@ class OacpResult {
     if (isSuccess) return 'Action completed.';
     return 'Action failed.';
   }
+
+  factory OacpResult.fromMessage(OacpResultMessage msg) {
+    return OacpResult(
+      requestId: msg.requestId,
+      status: msg.status,
+      capabilityId: msg.capabilityId,
+      message: msg.message,
+      error: msg.error,
+      sourcePackage: msg.sourcePackage,
+      result: msg.result,
+    );
+  }
 }
 
-class OacpResultService {
-  static const _channel = EventChannel('com.oacp.hark/results');
+/// Receives OACP result broadcasts from native via [HarkResultFlutterApi].
+///
+/// The plugin's BroadcastReceiver forwards results through Pigeon's FlutterApi
+/// callback, which this class implements. Results are exposed as a broadcast
+/// [Stream<OacpResult>].
+class OacpResultService implements HarkResultFlutterApi {
+  OacpResultService() {
+    HarkResultFlutterApi.setUp(this);
+  }
 
-  Stream<OacpResult>? _stream;
+  final _controller = StreamController<OacpResult>.broadcast();
 
-  Stream<OacpResult> get results {
-    _stream ??= _channel.receiveBroadcastStream().where((event) {
-      return event is Map;
-    }).map((event) {
-      final map = Map<String, dynamic>.from(event as Map);
-      return OacpResult(
-        requestId: map['requestId'] as String?,
-        status: (map['status'] as String?) ?? 'completed',
-        capabilityId: map['capabilityId'] as String?,
-        message: map['message'] as String?,
-        error: map['error'] as String?,
-        sourcePackage: map['sourcePackage'] as String?,
-        result: map['result'] as String?,
-      );
-    });
-    return _stream!;
+  Stream<OacpResult> get results => _controller.stream;
+
+  @override
+  void onOacpResult(OacpResultMessage result) {
+    _controller.add(OacpResult.fromMessage(result));
+  }
+
+  void dispose() {
+    HarkResultFlutterApi.setUp(null);
+    _controller.close();
   }
 }

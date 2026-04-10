@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hark_platform/hark_platform.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/command_resolution.dart';
@@ -69,7 +69,8 @@ class ChatNotifier extends Notifier<ChatState> {
   /// message, if any.
   String? _pendingAssistantMessageId;
 
-  static const _assistChannel = MethodChannel('com.oacp.hark/assist');
+  final _commonApi = HarkCommonApi();
+  final _mainApi = HarkMainApi();
 
   @override
   ChatState build() {
@@ -118,16 +119,6 @@ class ChatNotifier extends Notifier<ChatState> {
       _commandResolver.initialize();
 
       _resultSubscription = _resultService.results.listen(_onOacpResult);
-
-      _assistChannel.setMethodCallHandler((call) async {
-        if (call.method == 'startListening' &&
-            !state.isInitializing &&
-            !state.isThinking) {
-          state = state.copyWith(continuousListening: true);
-          await onMicPressed();
-        }
-        return null;
-      });
 
       final sttInit = await _sttService.initialize();
       if (!sttInit) {
@@ -234,11 +225,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Opens the system default-assistant picker.
   Future<void> openAssistantSettings() async {
-    try {
-      await _assistChannel.invokeMethod('openAssistantSettings');
-    } catch (_) {
-      // Not available on this platform.
-    }
+    await _mainApi.openAssistantSettings();
     // Re-check after returning from settings.
     await Future.delayed(const Duration(seconds: 1));
     await _checkDefaultAssistant();
@@ -572,14 +559,8 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   Future<void> _checkDefaultAssistant() async {
-    try {
-      final result = await _assistChannel.invokeMethod<bool>(
-        'isDefaultAssistant',
-      );
-      state = state.copyWith(isDefaultAssistant: result ?? false);
-    } catch (_) {
-      // Not available on this platform.
-    }
+    final result = await _commonApi.isDefaultAssistant();
+    state = state.copyWith(isDefaultAssistant: result);
   }
 
   // ---------------------------------------------------------------------------

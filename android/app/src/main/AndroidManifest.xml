@@ -71,6 +71,17 @@
             </intent-filter>
         </service>
 
+        <!-- Dedicated overlay Activity for the assistant panel.
+             Translucent theme applied statically — no runtime switching. -->
+        <activity
+            android:name=".OverlayActivity"
+            android:theme="@style/OverlayTheme"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true" />
+
         <!-- GPU support for on-device LLM inference (OpenCL) -->
         <uses-native-library
             android:name="libOpenCL.so"
