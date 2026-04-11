@@ -18,8 +18,8 @@ import kotlinx.coroutines.launch
  *
  * Manages its own [CoroutineScope] for the audio pipeline. The engine
  * owns an internal [AudioRecord] at 16 kHz mono, so it cannot run
- * simultaneously with Android STT. Use [pause]/[resume] to gate
- * detection while STT is active.
+ * simultaneously with Android STT. Use [pause]/[resume] to stop/restart
+ * the engine and release the mic for STT.
  */
 class WakeWordDetector(private val context: Context) {
 
@@ -30,6 +30,9 @@ class WakeWordDetector(private val context: Context) {
     private var engine: WakeWordEngine? = null
     private var scope: CoroutineScope? = null
     private var collectorJob: Job? = null
+    private var listener: Listener? = null
+    private var modelPath: String = "wakeword/hello_world.onnx"
+    private var threshold: Float = 0.5f
     private var isPaused = false
 
     val isRunning: Boolean get() = engine != null
@@ -37,12 +40,7 @@ class WakeWordDetector(private val context: Context) {
     /**
      * Starts wake word detection. The engine opens the microphone and
      * begins continuous inference. Detections are delivered to [listener]
-     * on the main thread via [kotlinx.coroutines.Dispatchers.Main].
-     *
-     * @param modelPath Asset path to the wake word ONNX model
-     *        (e.g. "wakeword/hey_hark.onnx")
-     * @param threshold Detection confidence threshold (0.0-1.0).
-     *        Lower = more sensitive, higher = fewer false positives.
+     * on the main thread.
      */
     fun start(
         listener: Listener,
@@ -54,6 +52,15 @@ class WakeWordDetector(private val context: Context) {
             return
         }
 
+        this.listener = listener
+        this.modelPath = modelPath
+        this.threshold = threshold
+
+        _startEngine()
+        Log.i(TAG, "Wake word detection started (model=$modelPath, threshold=$threshold)")
+    }
+
+    private fun _startEngine() {
         val engineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         scope = engineScope
 
@@ -74,62 +81,58 @@ class WakeWordDetector(private val context: Context) {
         )
         engine = wakeEngine
 
-        // Collect detections on Default, notify listener on Main.
         collectorJob = engineScope.launch {
             wakeEngine.detections.collect { detection ->
-                if (!isPaused) {
-                    Log.i(TAG, "Wake word detected: ${detection.model.name} " +
-                        "(score=${String.format("%.3f", detection.score)})")
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                        listener.onDetected()
-                    }
+                Log.i(TAG, "Wake word detected: ${detection.model.name} " +
+                    "(score=${String.format("%.3f", detection.score)})")
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    listener?.onDetected()
                 }
             }
         }
 
         wakeEngine.start()
-        Log.i(TAG, "Wake word detection started (model=$modelPath, threshold=$threshold)")
     }
 
     /**
-     * Pauses detection without releasing resources. Use when STT is
-     * active to avoid AudioRecord conflicts. The engine continues
-     * running but detections are suppressed.
+     * Pauses detection by fully stopping the engine and releasing the
+     * microphone. This frees [AudioRecord] so STT can use it.
+     * Call [resume] to restart detection after STT finishes.
      */
     fun pause() {
+        if (isPaused) return
         isPaused = true
-        Log.d(TAG, "Detection paused")
+        _stopEngine()
+        Log.i(TAG, "Detection paused (mic released for STT)")
     }
 
     /**
-     * Resumes detection after a [pause].
+     * Resumes detection after a [pause]. Restarts the engine and
+     * re-acquires the microphone.
      */
     fun resume() {
+        if (!isPaused) return
         isPaused = false
-        Log.d(TAG, "Detection resumed")
+        _startEngine()
+        Log.i(TAG, "Detection resumed (mic re-acquired)")
     }
 
-    /**
-     * Stops detection and releases the microphone, but keeps the engine
-     * instance for quick restart. Call [release] for full cleanup.
-     */
-    fun stop() {
-        engine?.stop()
-        Log.i(TAG, "Wake word detection stopped")
-    }
-
-    /**
-     * Fully releases all resources: ONNX sessions, audio pipeline,
-     * coroutine scope. The detector cannot be restarted after this.
-     * Create a new [WakeWordDetector] instance instead.
-     */
-    fun release() {
+    private fun _stopEngine() {
         collectorJob?.cancel()
         collectorJob = null
         engine?.stop()
         engine = null
         scope?.cancel()
         scope = null
+    }
+
+    /**
+     * Fully releases all resources. The detector cannot be restarted
+     * after this. Create a new [WakeWordDetector] instance instead.
+     */
+    fun release() {
+        _stopEngine()
+        listener = null
         isPaused = false
         Log.i(TAG, "Wake word detector released")
     }
