@@ -21,6 +21,9 @@ For the OACP protocol roadmap, see [OpenAppCapabilityProtocol/oacp](https://gith
 - Multi-model support with persistent model backup
 - Inference logging for debugging and model comparison
 - Real-world integrations tested: Breezy Weather, Binary Eye, Voice Recorder, Libre Camera, Wikipedia, ArchiveTune
+- Assist overlay via FlutterEngineGroup: thin UI shell with zero model loading, instant launch on assist gesture
+- Type-safe Dart/Kotlin bindings via hark_platform plugin (Pigeon), replacing all raw MethodChannel/EventChannel code
+- Two-engine architecture: main engine (full processing) + overlay engine (UI shell), state relayed through native Pigeon bridge
 
 ---
 
@@ -58,7 +61,7 @@ Status: `[ ]`
 - [ ] Eliminate Android system beep on listen start
 - [ ] Enable true continuous listening without system STT limitations
 
-### 4. Model Loading Performance — measurement + decision in progress
+### 4. Model Loading Performance, measurement + decision in progress
 
 Status: `[-]`
 
@@ -70,40 +73,35 @@ The remaining question is whether the **current `flutter_embedder` + `flutter_ge
 
 **Near-term plan** (replaces the old 7-slice breakdown):
 
-- [x] Slice 0 — Quantization benchmark harness (`tools/quant_bench/`), 20-case embedding gold set, 15-case slot-filling gold set, v3 quant matrix, decision findings in [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md). Shipped.
-- [x] Instrumentation — Stopwatch-wrapped timing around the current load path, logs to `model_load_logs/load_*.jsonl`. Shipped as the `f213e36` commit (reusable for both runtimes).
-- [x] Keyword / alias fast-path — zero-parameter commands (flashlight, pause, scan) dispatch without touching the slot-filling LLM. Shipped as the `2efe65d` commit.
-- [-] **Phase 1 — Comparative measurement**: run the same bench harness (or a flutter_gemma fork of it) against the current stack on Moto G56. Produce a comparison table with concrete numbers for every cell. Write up `docs/plans/load-time-baseline.md`.
-- [ ] **Phase 2 — Migration decision + load-time optimization**: based on Phase 1 data, migrate the embedder to llamadart (if clearly faster), keep the current slot filler (per Slice 0 findings), and land load-time optimizations (parallel init, persistent action embedding cache, warm engine retention). See `.claude/plans/async-twirling-galaxy.md` for the full phased plan.
+- [x] Slice 0: Quantization benchmark harness (`tools/quant_bench/`), 20-case embedding gold set, 15-case slot-filling gold set, v3 quant matrix, decision findings in [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md). Shipped.
+- [x] Instrumentation: Stopwatch-wrapped timing around the current load path, logs to `model_load_logs/load_*.jsonl`. Shipped as the `f213e36` commit (reusable for both runtimes).
+- [x] Keyword / alias fast-path: zero-parameter commands (flashlight, pause, scan) dispatch without touching the slot-filling LLM. Shipped as the `2efe65d` commit.
+- [-] **Phase 1, Comparative measurement**: run the same bench harness (or a flutter_gemma fork of it) against the current stack on Moto G56. Produce a comparison table with concrete numbers for every cell. Write up `docs/plans/load-time-baseline.md`.
+- [ ] **Phase 2, Migration decision + load-time optimization**: based on Phase 1 data, migrate the embedder to llamadart (if clearly faster), keep the current slot filler (per Slice 0 findings), and land load-time optimizations (parallel init, persistent action embedding cache, warm engine retention). See `.claude/plans/async-twirling-galaxy.md` for the full phased plan.
 
 **Deferred**: slot-filling migration to llamadart is killed per Slice 0 findings. Smaller quants (Q4_0, Qwen2.5-0.5B Q4_K_M) were tested and don't break the hardware wall. The slot-filling workstream re-opens only if a future runtime introduces a working GPU/NPU delegate for mid-range Android.
 
 **Research preserved**:
-- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md) — Track 2 research on encoder-based slot tagging as a non-LLM alternative. Parked for v2 vision.
-- [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md) — original 7-slice plan, preserved for historical context.
+- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md): Track 2 research on encoder-based slot tagging as a non-LLM alternative. Parked for v2 vision.
+- [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md): original 7-slice plan, preserved for historical context.
 
-**Why this is #4**: Before the overlay ships, cold start needs to feel instant. Measurement first, optimization second, migration only if the data supports it.
+**Update:** The overlay architecture solved the cold-start problem for the assist gesture. The overlay is a thin UI shell that loads zero models, so it launches instantly. The main engine handles all model loading in the background. Remaining model loading optimizations are still valuable for the main app's splash screen, but they no longer block the overlay experience.
+
+**Why this is #4**: Measurement first, optimization second, migration only if the data supports it.
 
 ### 5. Assistant Overlay
 
-Status: `[ ]`
+Status: `[x]`
 
-Blocked by Model Loading Performance (#4).
+- [x] Dedicated lightweight OverlayActivity (translucent FlutterActivity, separate from MainActivity)
+- [x] FlutterEngineGroup with two engines: main (full app) + overlay (thin UI shell)
+- [x] Chat bubbles with app icons, keyboard/mic toggle, auto-start mic on open
+- [x] Zero model loading in overlay, all processing stays on main engine
+- [x] State relay between engines via native Pigeon bridge through OverlayActivity
+- [x] hark_platform plugin (Pigeon) replacing all raw MethodChannel/EventChannel code
+- [x] Migrated native handlers to plugin: OacpDiscoveryHandler, LocalModelStorageHandler, OacpResultReceiver removed
 
-- [ ] Dedicated lightweight overlay Activity (currently opens full MainActivity)
-- [ ] Extract shared Flutter engine for both main and overlay Activities
-- [ ] Assistant-like experience on top of current app (like Claude/ChatGPT)
-
-### 6. Action Chips and Buttons
-
-Status: `[ ]`
-
-- [ ] Tappable action chips in chat bubbles for capability-help replies
-- [ ] Disambiguation buttons ("Did you mean front camera or rear camera?")
-- [ ] Follow-up suggestion chips (Google Assistant-style)
-- [ ] Protocol-driven: buttons come from discovered OACP actions, not hardcoded
-
-### 7. Wake Word
+### 6. Wake Word
 
 Status: `[ ]`
 
@@ -111,6 +109,15 @@ Status: `[ ]`
 - [ ] Privacy controls (when is the mic active)
 - [ ] Battery impact controls
 - [ ] Optional hardware-aware path for supported devices
+
+### 7. Action Chips and Buttons
+
+Status: `[ ]`
+
+- [ ] Tappable action chips in chat bubbles for capability-help replies
+- [ ] Disambiguation buttons ("Did you mean front camera or rear camera?")
+- [ ] Follow-up suggestion chips (Google Assistant-style)
+- [ ] Protocol-driven: buttons come from discovered OACP actions, not hardcoded
 
 ---
 
@@ -155,18 +162,17 @@ These are intentionally deferred:
 - iOS support
 - Multi-intent utterances ("set an alarm and turn off the lights")
 - NPU/backend optimization before the inference provider layer is stable
-- Wake word before assistant overlay is done
 
 ---
 
 ## Long-term vision
 
-Hark's long-term direction is an **agent architecture** with memory, routines, ambient sensing, multi-turn conversation, and interruption handling — capable of running multi-step automations like "start the work drive" and handling interruptions like an incoming call pausing music and resuming after.
+Hark's long-term direction is an **agent architecture** with memory, routines, ambient sensing, multi-turn conversation, and interruption handling, capable of running multi-step automations like "start the work drive" and handling interruptions like an incoming call pausing music and resuming after.
 
 That architecture is the right long-term direction but intentionally deferred until the near-term foundation (fast load times, polished splash UX, floating overlay, wake word) is solid. Full research, first-principles toolbox, layered architecture, scenario walkthroughs, and pre-mortem are preserved in:
 
-- [`docs/vision/hark-v2-agent-architecture.md`](docs/vision/hark-v2-agent-architecture.md) — the complete vision doc.
-- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md) — research on encoder-based slot tagging as a non-LLM alternative for on-device parameter extraction.
-- [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md) — the hardware benchmark findings that shaped the vision (local generative slot filling is hardware-bound at ~28 s/case on mid-range Android; cloud or encoder NER are the viable paths).
+- [`docs/vision/hark-v2-agent-architecture.md`](docs/vision/hark-v2-agent-architecture.md): the complete vision doc.
+- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md): research on encoder-based slot tagging as a non-LLM alternative for on-device parameter extraction.
+- [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md): the hardware benchmark findings that shaped the vision (local generative slot filling is hardware-bound at ~28 s/case on mid-range Android; cloud or encoder NER are the viable paths).
 
 The v2 architecture is a hypothesis, not a commitment. It will be reconsidered once the near-term plan ships and there is real shipping data from Hark v1 about what users actually do.

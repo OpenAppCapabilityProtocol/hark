@@ -122,13 +122,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ref.read(chatProvider.notifier).onTextSubmitted(text),
             onModeToggle: () {
               final current = ref.read(chatProvider).inputMode;
-              ref
-                  .read(chatProvider.notifier)
-                  .setInputMode(
-                    current == InputMode.mic
-                        ? InputMode.keyboard
-                        : InputMode.mic,
-                  );
+              final newMode = current == InputMode.mic
+                  ? InputMode.keyboard
+                  : InputMode.mic;
+              ref.read(chatProvider.notifier).setInputMode(newMode);
+              // Auto-start listening when switching back to mic.
+              if (newMode == InputMode.mic) {
+                ref.read(chatProvider.notifier).onMicPressed();
+              }
             },
           ),
         ],

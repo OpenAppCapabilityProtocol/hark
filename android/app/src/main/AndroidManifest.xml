@@ -7,7 +7,7 @@
         android:maxSdkVersion="28" />
     <application
         android:label="Hark"
-        android:name="${applicationName}"
+        android:name=".HarkApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -70,6 +70,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </service>
+
+        <!-- Dedicated overlay Activity for the assistant panel.
+             Translucent theme applied statically — no runtime switching. -->
+        <activity
+            android:name=".OverlayActivity"
+            android:theme="@style/OverlayTheme"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true" />
 
         <!-- GPU support for on-device LLM inference (OpenCL) -->
         <uses-native-library

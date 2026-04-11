@@ -1,23 +1,12 @@
-import 'package:flutter/services.dart';
+import 'package:hark_platform/hark_platform.dart';
 
 import '../models/discovered_app.dart';
 
 class AppDiscoveryService {
-  static const MethodChannel _channel = MethodChannel(
-    'com.oacp.hark/discovery',
-  );
+  final _api = HarkCommonApi();
 
   Future<List<DiscoveredApp>> discoverApps() async {
-    final rawApps = await _channel.invokeMethod<List<Object?>>(
-      'discoverOacpApps',
-    );
-    if (rawApps == null) {
-      return const [];
-    }
-
-    return rawApps
-        .whereType<Map<Object?, Object?>>()
-        .map(DiscoveredApp.fromMap)
-        .toList();
+    final results = await _api.discoverOacpApps();
+    return results.map(DiscoveredApp.fromMessage).toList();
   }
 }
