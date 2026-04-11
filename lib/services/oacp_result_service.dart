@@ -54,17 +54,25 @@ class OacpResultService implements HarkResultFlutterApi {
     HarkResultFlutterApi.setUp(this);
   }
 
-  final _controller = StreamController<OacpResult>.broadcast();
+  final _resultController = StreamController<OacpResult>.broadcast();
+  final _wakeWordController = StreamController<void>.broadcast();
 
-  Stream<OacpResult> get results => _controller.stream;
+  Stream<OacpResult> get results => _resultController.stream;
+  Stream<void> get wakeWordDetections => _wakeWordController.stream;
 
   @override
   void onOacpResult(OacpResultMessage result) {
-    _controller.add(OacpResult.fromMessage(result));
+    _resultController.add(OacpResult.fromMessage(result));
+  }
+
+  @override
+  void onWakeWordDetected() {
+    _wakeWordController.add(null);
   }
 
   void dispose() {
     HarkResultFlutterApi.setUp(null);
-    _controller.close();
+    _resultController.close();
+    _wakeWordController.close();
   }
 }

@@ -58,6 +58,8 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         HarkCommonApi.setUp(binding.binaryMessenger, null)
+        wakeWordDetector?.release()
+        wakeWordDetector = null
         resultReceiver?.unregister()
         resultReceiver = null
         resultFlutterApi = null
@@ -371,6 +373,46 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
         }
         val file = backupFile(fileName)
         callback(Result.success(if (file.exists()) file.delete() else true))
+    }
+
+    // ── HarkCommonApi: wake word detection ─────────────────────
+
+    private var wakeWordDetector: WakeWordDetector? = null
+
+    override fun startWakeWordService() {
+        val ctx = context ?: return
+        if (wakeWordDetector?.isRunning == true) return
+
+        val detector = WakeWordDetector(ctx)
+        detector.start(
+            listener = WakeWordDetector.Listener {
+                // Notify Dart that wake word was detected.
+                resultFlutterApi?.onWakeWordDetected { }
+            },
+            // Use hello_world.onnx as placeholder until hey_hark.onnx is trained.
+            modelPath = "wakeword/hello_world.onnx",
+            threshold = 0.5f,
+        )
+        wakeWordDetector = detector
+        Log.i(TAG, "Wake word service started")
+    }
+
+    override fun stopWakeWordService() {
+        wakeWordDetector?.release()
+        wakeWordDetector = null
+        Log.i(TAG, "Wake word service stopped")
+    }
+
+    override fun isWakeWordRunning(): Boolean {
+        return wakeWordDetector?.isRunning == true
+    }
+
+    override fun setWakeWordPaused(paused: Boolean) {
+        if (paused) {
+            wakeWordDetector?.pause()
+        } else {
+            wakeWordDetector?.resume()
+        }
     }
 
     // ── OACP result receiver (BroadcastReceiver → FlutterApi) ────

@@ -51,6 +51,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   // Transient state that doesn't belong in [ChatState].
   StreamSubscription<OacpResult>? _resultSubscription;
+  StreamSubscription<void>? _wakeWordSubscription;
   Timer? _restartTimer;
   int _messageCounter = 0;
 
@@ -97,6 +98,7 @@ class ChatNotifier extends Notifier<ChatState> {
     ref.onDispose(() {
       _restartTimer?.cancel();
       _resultSubscription?.cancel();
+      _wakeWordSubscription?.cancel();
       // Do NOT dispose STT/TTS/etc — they are owned by their own providers.
     });
 
@@ -119,6 +121,10 @@ class ChatNotifier extends Notifier<ChatState> {
       _commandResolver.initialize();
 
       _resultSubscription = _resultService.results.listen(_onOacpResult);
+      _wakeWordSubscription = _resultService.wakeWordDetections.listen((_) {
+        debugPrint('ChatNotifier: wake word detected, auto-starting mic');
+        onMicPressed();
+      });
 
       final sttInit = await _sttService.initialize();
       if (!sttInit) {
@@ -238,6 +244,9 @@ class ChatNotifier extends Notifier<ChatState> {
       continuousListening: false,
       statusText: _idleStatusText(),
     );
+
+    // Resume wake word detection now that STT is done.
+    _commonApi.setWakeWordPaused(false);
   }
 
   /// Opens the system default-assistant picker.
@@ -254,6 +263,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
   Future<void> _startListening() async {
     _restartTimer?.cancel();
+
+    // Pause wake word detection while STT is active (both use AudioRecord).
+    _commonApi.setWakeWordPaused(true);
 
     // Create a pending user bubble that will be updated in place as STT
     // partials arrive. The UI renders this as the "live transcript" bubble.
