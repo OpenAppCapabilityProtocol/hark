@@ -20,17 +20,17 @@ import java.util.UUID
  * Translucent Activity that hosts the overlay Flutter UI and relays
  * between the overlay engine and the main engine.
  *
- * The overlay engine is a thin UI shell — no models, no STT. All
- * processing happens on the main engine. This Activity bridges them:
- *
- * - Overlay → micPressed/cancelListening → relay to main engine
- * - Main engine → pushStateToOverlay → relay to overlay engine
+ * Lifecycle:
+ * - configureFlutterEngine: first open → onOverlayOpened (clears + mic)
+ * - onNewIntent: re-invocation while showing → onOverlayOpened (keeps session)
+ * - cleanUpFlutterEngine: Activity destroyed (back press) → onOverlayDismissed
+ * - dismiss/openFullApp: explicit close → onOverlayDismissed + finish()
+ * - HOME press: just backgrounds — no dismiss signal, session persists
  */
 class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
 
     private var overlayFlutterApi: HarkOverlayFlutterApi? = null
     private var mainFlutterApi: HarkMainFlutterApi? = null
-    private var isConfigured = false
 
     override fun provideFlutterEngine(context: Context): FlutterEngine {
         val app = application as HarkApplication
@@ -74,35 +74,15 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
         // Notify overlay of new session.
         notifyNewSession()
 
-        isConfigured = true
         Log.i(TAG, "Relay configured — overlay ↔ main bridge active")
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         notifyNewSession()
-        // Notify main engine again (re-invocation).
+        // Notify main engine (re-invocation — session persists).
         mainFlutterApi?.onOverlayOpened { }
-        Log.i(TAG, "onNewIntent — new session")
-    }
-
-    override fun onStop() {
-        super.onStop()
-        // Mark overlay as inactive when it loses visibility (HOME press,
-        // app launched, etc.) so the next open starts a fresh session.
-        if (isConfigured) {
-            mainFlutterApi?.onOverlayDismissed { }
-            Log.i(TAG, "onStop — overlay no longer visible")
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        // Re-notify when overlay becomes visible again.
-        if (isConfigured) {
-            mainFlutterApi?.onOverlayOpened { }
-            Log.i(TAG, "onStart — overlay visible again")
-        }
+        Log.i(TAG, "onNewIntent — overlay re-invoked")
     }
 
     private fun notifyNewSession() {
@@ -119,7 +99,7 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
         HarkOverlayApi.setUp(flutterEngine.dartExecutor.binaryMessenger, null)
         overlayFlutterApi = null
 
-        // Teardown main engine bridge.
+        // Teardown main engine bridge and notify dismissed.
         val mainEngine = FlutterEngineCache.getInstance()
             .get(HarkApplication.MAIN_ENGINE_ID)
         if (mainEngine != null) {
@@ -142,7 +122,7 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
     }
 
     override fun notifyOverlayActive(active: Boolean) {
-        // Main engine can query this — no-op for now.
+        // No-op for now.
     }
 
     // ── HarkOverlayApi: overlay sends actions → relay to main ────
