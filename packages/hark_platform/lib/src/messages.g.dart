@@ -161,6 +161,7 @@ class OverlayChatMessage {
     required this.isPending,
     required this.isError,
     this.metadata,
+    this.sourcePackageName,
     this.sourceAppName,
   });
 
@@ -176,6 +177,8 @@ class OverlayChatMessage {
 
   String? metadata;
 
+  String? sourcePackageName;
+
   String? sourceAppName;
 
   Object encode() {
@@ -186,6 +189,7 @@ class OverlayChatMessage {
       isPending,
       isError,
       metadata,
+      sourcePackageName,
       sourceAppName,
     ];
   }
@@ -199,7 +203,8 @@ class OverlayChatMessage {
       isPending: result[3]! as bool,
       isError: result[4]! as bool,
       metadata: result[5] as String?,
-      sourceAppName: result[6] as String?,
+      sourcePackageName: result[6] as String?,
+      sourceAppName: result[7] as String?,
     );
   }
 }

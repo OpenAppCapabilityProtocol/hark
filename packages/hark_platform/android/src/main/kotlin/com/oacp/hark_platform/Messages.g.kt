@@ -150,6 +150,7 @@ data class OverlayChatMessage (
   val isPending: Boolean,
   val isError: Boolean,
   val metadata: String? = null,
+  val sourcePackageName: String? = null,
   val sourceAppName: String? = null
 )
  {
@@ -161,8 +162,9 @@ data class OverlayChatMessage (
       val isPending = pigeonVar_list[3] as Boolean
       val isError = pigeonVar_list[4] as Boolean
       val metadata = pigeonVar_list[5] as String?
-      val sourceAppName = pigeonVar_list[6] as String?
-      return OverlayChatMessage(id, role, text, isPending, isError, metadata, sourceAppName)
+      val sourcePackageName = pigeonVar_list[6] as String?
+      val sourceAppName = pigeonVar_list[7] as String?
+      return OverlayChatMessage(id, role, text, isPending, isError, metadata, sourcePackageName, sourceAppName)
     }
   }
   fun toList(): List<Any?> {
@@ -173,6 +175,7 @@ data class OverlayChatMessage (
       isPending,
       isError,
       metadata,
+      sourcePackageName,
       sourceAppName,
     )
   }

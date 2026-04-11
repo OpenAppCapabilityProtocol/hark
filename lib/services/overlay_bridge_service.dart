@@ -39,7 +39,9 @@ class OverlayBridgeService extends Notifier<bool>
   void onOverlayOpened() {
     debugPrint('OverlayBridge: overlay opened');
     state = true;
-    // Push current state immediately so overlay has content.
+    // Fresh session on each assist gesture.
+    ref.read(chatProvider.notifier).clearSession();
+    // Push cleared state so overlay renders empty.
     _pushState(ref.read(chatProvider));
     // Auto-start mic on overlay open.
     ref.read(chatProvider.notifier).onMicPressed();
@@ -92,6 +94,7 @@ class OverlayBridgeService extends Notifier<bool>
           isPending: m.isPending,
           isError: m.isError,
           metadata: m.metadata,
+          sourcePackageName: m.sourcePackageName,
           sourceAppName: m.sourceAppName,
         );
       }).toList();

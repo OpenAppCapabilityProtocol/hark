@@ -91,6 +91,7 @@ class OverlayDisplayNotifier extends Notifier<OverlayDisplayState>
       isPending: m.isPending,
       isError: m.isError,
       metadata: m.metadata,
+      sourcePackageName: m.sourcePackageName,
       sourceAppName: m.sourceAppName,
     );
   }

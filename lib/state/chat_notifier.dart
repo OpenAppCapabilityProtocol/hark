@@ -150,6 +150,23 @@ class ChatNotifier extends Notifier<ChatState> {
   // Public API (invoked by ChatScreen)
   // ---------------------------------------------------------------------------
 
+  /// Clears all messages and resets to the idle state. Called when a new
+  /// overlay session starts so each assist gesture gets a fresh conversation.
+  void clearSession() {
+    _restartTimer?.cancel();
+    _pendingUserMessageId = null;
+    _pendingAssistantMessageId = null;
+    _messageCounter = 0;
+    _consecutiveFailures = 0;
+    state = state.copyWith(
+      messages: const [],
+      isListening: false,
+      isThinking: false,
+      statusText: _idleStatusText(),
+      clearError: true,
+    );
+  }
+
   /// Toggles STT. If already listening, cancels. Otherwise requests
   /// microphone permission and starts a fresh listening session.
   Future<void> onMicPressed() async {

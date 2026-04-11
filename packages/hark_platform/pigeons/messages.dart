@@ -66,6 +66,7 @@ class OverlayChatMessage {
     required this.isPending,
     required this.isError,
     this.metadata,
+    this.sourcePackageName,
     this.sourceAppName,
   });
 
@@ -75,6 +76,7 @@ class OverlayChatMessage {
   final bool isPending;
   final bool isError;
   final String? metadata;
+  final String? sourcePackageName;
   final String? sourceAppName;
 }
 
