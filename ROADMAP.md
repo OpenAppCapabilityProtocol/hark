@@ -103,11 +103,23 @@ Status: `[x]`
 
 ### 6. Wake Word
 
-Status: `[ ]`
+Status: `[-]`
 
-- [ ] Software wake-word detection ("Hey Hark")
-- [ ] Privacy controls (when is the mic active)
-- [ ] Battery impact controls
+**Shipped:**
+- [x] On-device wake word detection ("Hey Hark") using openWakeWord (Apache 2.0) + ONNX Runtime
+- [x] Custom-trained hey_harkh.onnx model (201KB) with melspectrogram + embedding preprocessors
+- [x] Pigeon APIs: startWakeWordService, stopWakeWordService, isWakeWordRunning, setWakeWordPaused in HarkCommonApi
+- [x] onWakeWordDetected callback in HarkResultFlutterApi, exposed as wakeWordDetections stream in OacpResultService
+- [x] ChatNotifier auto-starts mic on wake word detection
+- [x] Mutual exclusion with STT: wake word engine stops while speech recognition is active, restarts after
+- [x] Auto-starts after ChatNotifier init, engine persists in HarkApplication (works when app is backgrounded)
+
+**Remaining:**
+- [ ] Background foreground service so wake word runs even when app is fully closed
+- [ ] Wake word triggers overlay launch (not just in-app mic)
+- [ ] Settings screen: enable/disable wake word, sensitivity slider
+- [ ] Privacy controls (when is the mic active, visual indicator)
+- [ ] Battery impact measurement and controls
 - [ ] Optional hardware-aware path for supported devices
 
 ### 7. Action Chips and Buttons

@@ -71,6 +71,16 @@ Hark can register as your device's default voice assistant:
 - Continuous listening mode: mic auto-restarts after each command
 - Uses `RoleManager` on Android 10+ to request ROLE_ASSISTANT
 
+## Wake Word
+
+Hark supports hands-free activation with the wake phrase **"Hey Hark"**. Wake word detection runs entirely on-device using [openWakeWord](https://github.com/dscripka/openWakeWord) (Apache 2.0) with ONNX Runtime, so no audio ever leaves your phone.
+
+- Works on any Android device, no special hardware required
+- Custom-trained wake word model (201KB ONNX), lightweight enough to run continuously
+- Detection auto-starts after app initialization and persists while the app is running
+- Mutually exclusive with speech-to-text: the wake word engine pauses while STT is active, then resumes after
+- Currently activates the in-app microphone; background service and overlay launch are coming next
+
 ## Getting Started
 
 ### Prerequisites
@@ -188,7 +198,7 @@ See [ROADMAP.md](ROADMAP.md) for the full plan. Key priorities:
 - **Self-hosted inference** - Connect Hark to Ollama/LM Studio on your local network for unlimited context and OACP.md consumption
 - **BYOK cloud** - Bring your own API key for OpenAI, Gemini, Anthropic
 - **Better STT** - Evaluate whisper.cpp / sherpa-onnx for on-device speech recognition
-- **Wake word** - "Hey Hark" activation without touching the phone
+- **Wake word** (in progress) - "Hey Hark" on-device detection shipped, background service and overlay trigger coming next
 - **Gemma 4** - Single-model replacement for the two-stage pipeline when flutter_gemma supports it
 
 ## Contributing

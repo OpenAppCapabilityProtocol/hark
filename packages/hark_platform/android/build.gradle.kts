@@ -18,6 +18,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
@@ -44,4 +45,16 @@ android {
     defaultConfig {
         minSdk = 26
     }
+}
+
+dependencies {
+    // Wake word detection: openWakeWord (Apache 2.0) + Silero VAD (MIT)
+    implementation("xyz.rementia:openwakeword:0.1.4")
+    implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
+    // Force single ONNX Runtime version across all transitive deps.
+    // App uses 1.23.0 for EmbeddingGemma; openWakeWord uses 1.18.0;
+    // android-vad uses 1.22.0. All are compatible with 1.23.0.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.0")
+    // Kotlin coroutines for WakeWordEngine's Flow-based API
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

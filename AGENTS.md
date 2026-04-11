@@ -70,7 +70,11 @@ hark/
 │       ├── stt_service.dart                     # Speech-to-text wrapper
 │       └── tts_service.dart                     # Text-to-speech wrapper
 ├── assets/
-│   └── hark_logo.png                            # Splash + chat empty-state hero (declared in pubspec)
+│   ├── hark_logo.png                            # Splash + chat empty-state hero (declared in pubspec)
+│   └── wakeword/
+│       └── hey_harkh.onnx                       # Custom-trained wake word model (201KB)
+├── melspectrogram.onnx                           # openWakeWord audio preprocessor (root-level)
+├── embedding_model.onnx                          # openWakeWord embedding preprocessor (root-level)
 ├── android/app/src/main/kotlin/com/oacp/hark/
 │   ├── MainActivity.kt                          # Main FlutterActivity, hosts main engine
 │   ├── OverlayActivity.kt                       # Translucent FlutterActivity for assist overlay
@@ -78,7 +82,8 @@ hark/
 │   ├── HarkVoiceInteractionService.kt           # Android system assistant service
 │   ├── HarkSessionService.kt                    # Voice interaction session factory
 │   ├── HarkSession.kt                           # Session lifecycle (launches OverlayActivity)
-│   └── HarkRecognitionService.kt                # Stub RecognitionService (required by Android)
+│   ├── HarkRecognitionService.kt                # Stub RecognitionService (required by Android)
+│   └── WakeWordDetector.kt                      # openWakeWord engine wrapper for "Hey Hark" detection
 ├── cargokit_options.yaml                        # Forces precompiled flutter_embedder binaries
 ├── docs/                                         # Architecture and design docs
 │   └── plans/phase1-ui-redesign.md              # Phase 1 (forui + Riverpod + go_router) history
@@ -161,6 +166,8 @@ IntentDispatcher → Android broadcast or activity intent
 | `flutter_tts` ^4.2.5 | Text-to-speech |
 | `android_intent_plus` ^6.0.0 | Intent dispatch |
 | `permission_handler` ^12.0.1 | Runtime permissions |
+| `xyz.rementia:openwakeword` 0.1.4 | On-device wake word detection engine (ONNX Runtime, Maven Central) |
+| `com.github.gkonovalov.android-vad:silero` 2.0.10 | Voice activity detection for wake word audio pipeline (JitPack) |
 
 | `hark_platform` (path) | Pigeon-based plugin for type-safe Dart/Kotlin platform bindings |
 | `pigeon` (dev, in plugin) | Code generator for type-safe platform channels |
@@ -186,10 +193,10 @@ dart run pigeon --input pigeons/messages.dart
 
 | API | Direction | Scope |
 |-----|-----------|-------|
-| `HarkCommonApi` | Dart to Kotlin | Available on all engines (discovery, intent dispatch, permissions) |
+| `HarkCommonApi` | Dart to Kotlin | Available on all engines (discovery, intent dispatch, permissions, wake word control: start/stop/pause service, query running state) |
 | `HarkOverlayApi` | Dart to Kotlin | Overlay engine only (dismiss overlay, relay user input to main engine) |
 | `HarkMainApi` | Dart to Kotlin | Main engine only (model control, session management) |
-| `HarkResultFlutterApi` | Kotlin to Dart | Callback from native to Dart (async results from OACP apps) |
+| `HarkResultFlutterApi` | Kotlin to Dart | Callback from native to Dart (async results from OACP apps, wake word detection events via onWakeWordDetected) |
 | `HarkOverlayFlutterApi` | Kotlin to Dart | Callback from native to overlay Dart (state updates from main engine) |
 
 The overlay engine is a thin UI shell that loads zero models. It receives state updates (STT transcripts, NLU results, TTS status) from the main engine via the native Pigeon bridge through OverlayActivity.
@@ -208,6 +215,8 @@ Hark uses a **FlutterEngineGroup** with two engines:
 **Why zero models in the overlay:** Loading models takes seconds on mid-range hardware. The overlay must appear instantly when the user triggers the assist gesture. By keeping the overlay as a pure UI shell, it launches with no cold-start delay. The main engine, which is already running in the background, handles all processing.
 
 **Session lifecycle:** When the assist gesture fires, `HarkSession` launches `OverlayActivity` instead of `MainActivity`. The overlay connects to the main engine via the native bridge, auto-starts the microphone, and presents the conversation UI. Dismissing the overlay finishes `OverlayActivity` without affecting the main engine.
+
+**Wake word (planned next phase):** Wake word detection ("Hey Hark") currently triggers in-app mic activation via `ChatNotifier`. The next phase will wire wake word detections to launch the overlay, so saying "Hey Hark" from any screen opens the assistant panel without touching the phone.
 
 ---
 

@@ -119,6 +119,11 @@ abstract class HarkCommonApi {
 
   @async
   bool deleteBackup(String fileName);
+
+  void startWakeWordService();
+  void stopWakeWordService();
+  bool isWakeWordRunning();
+  void setWakeWordPaused(bool paused);
 }
 
 // ── Overlay → Native (registered by OverlayActivity) ────────────
@@ -173,4 +178,5 @@ abstract class HarkMainFlutterApi {
 @FlutterApi()
 abstract class HarkResultFlutterApi {
   void onOacpResult(OacpResultMessage result);
+  void onWakeWordDetected();
 }
