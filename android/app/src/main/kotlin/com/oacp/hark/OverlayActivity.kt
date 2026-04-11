@@ -30,6 +30,7 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
 
     private var overlayFlutterApi: HarkOverlayFlutterApi? = null
     private var mainFlutterApi: HarkMainFlutterApi? = null
+    private var isConfigured = false
 
     override fun provideFlutterEngine(context: Context): FlutterEngine {
         val app = application as HarkApplication
@@ -73,6 +74,7 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
         // Notify overlay of new session.
         notifyNewSession()
 
+        isConfigured = true
         Log.i(TAG, "Relay configured — overlay ↔ main bridge active")
     }
 
@@ -82,6 +84,25 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
         // Notify main engine again (re-invocation).
         mainFlutterApi?.onOverlayOpened { }
         Log.i(TAG, "onNewIntent — new session")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Mark overlay as inactive when it loses visibility (HOME press,
+        // app launched, etc.) so the next open starts a fresh session.
+        if (isConfigured) {
+            mainFlutterApi?.onOverlayDismissed { }
+            Log.i(TAG, "onStop — overlay no longer visible")
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Re-notify when overlay becomes visible again.
+        if (isConfigured) {
+            mainFlutterApi?.onOverlayOpened { }
+            Log.i(TAG, "onStart — overlay visible again")
+        }
     }
 
     private fun notifyNewSession() {
