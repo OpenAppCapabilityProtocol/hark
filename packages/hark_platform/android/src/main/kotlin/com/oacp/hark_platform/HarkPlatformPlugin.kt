@@ -389,8 +389,7 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
                 // Notify Dart that wake word was detected.
                 resultFlutterApi?.onWakeWordDetected { }
             },
-            // Use hello_world.onnx as placeholder until hey_hark.onnx is trained.
-            modelPath = "wakeword/hello_world.onnx",
+            modelPath = "wakeword/hey_harkh.onnx",
             threshold = 0.3f,
         )
         wakeWordDetector = detector
