@@ -37,14 +37,23 @@ class OverlayBridgeService extends Notifier<bool>
 
   @override
   void onOverlayOpened() {
-    debugPrint('OverlayBridge: overlay opened');
+    final wasActive = state;
+    debugPrint('OverlayBridge: overlay opened (wasActive=$wasActive)');
     state = true;
-    // Fresh session on each assist gesture.
-    ref.read(chatProvider.notifier).clearSession();
-    // Push cleared state so overlay renders empty.
+
+    if (!wasActive) {
+      // Genuinely new session — clear previous conversation.
+      ref.read(chatProvider.notifier).clearSession();
+    }
+
+    // Push current state so overlay has content.
     _pushState(ref.read(chatProvider));
-    // Auto-start mic on overlay open.
-    ref.read(chatProvider.notifier).onMicPressed();
+
+    // Auto-start mic if not already listening or thinking.
+    final chat = ref.read(chatProvider);
+    if (!chat.isListening && !chat.isThinking) {
+      ref.read(chatProvider.notifier).onMicPressed();
+    }
   }
 
   @override
