@@ -183,7 +183,9 @@ data class OverlayStateMessage (
   val messages: List<OverlayChatMessage>,
   val isListening: Boolean,
   val isThinking: Boolean,
-  val statusText: String
+  val isInitializing: Boolean,
+  val statusText: String,
+  val inputMode: String
 )
  {
   companion object {
@@ -191,8 +193,10 @@ data class OverlayStateMessage (
       val messages = pigeonVar_list[0] as List<OverlayChatMessage>
       val isListening = pigeonVar_list[1] as Boolean
       val isThinking = pigeonVar_list[2] as Boolean
-      val statusText = pigeonVar_list[3] as String
-      return OverlayStateMessage(messages, isListening, isThinking, statusText)
+      val isInitializing = pigeonVar_list[3] as Boolean
+      val statusText = pigeonVar_list[4] as String
+      val inputMode = pigeonVar_list[5] as String
+      return OverlayStateMessage(messages, isListening, isThinking, isInitializing, statusText, inputMode)
     }
   }
   fun toList(): List<Any?> {
@@ -200,7 +204,9 @@ data class OverlayStateMessage (
       messages,
       isListening,
       isThinking,
+      isInitializing,
       statusText,
+      inputMode,
     )
   }
 }
@@ -406,6 +412,8 @@ interface HarkOverlayApi {
   fun openFullApp()
   fun micPressed()
   fun cancelListening()
+  fun textSubmitted(text: String)
+  fun setInputMode(mode: String)
 
   companion object {
     /** The codec used by HarkOverlayApi. */
@@ -470,6 +478,42 @@ interface HarkOverlayApi {
           channel.setMessageHandler { _, reply ->
             val wrapped: List<Any?> = try {
               api.cancelListening()
+              listOf(null)
+            } catch (exception: Throwable) {
+              wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.hark_platform.HarkOverlayApi.textSubmitted$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val textArg = args[0] as String
+            val wrapped: List<Any?> = try {
+              api.textSubmitted(textArg)
+              listOf(null)
+            } catch (exception: Throwable) {
+              wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.hark_platform.HarkOverlayApi.setInputMode$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val modeArg = args[0] as String
+            val wrapped: List<Any?> = try {
+              api.setInputMode(modeArg)
               listOf(null)
             } catch (exception: Throwable) {
               wrapError(exception)
@@ -642,6 +686,40 @@ class HarkMainFlutterApi(private val binaryMessenger: BinaryMessenger, private v
     val channelName = "dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayCancelListening$separatedMessageChannelSuffix"
     val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
     channel.send(null) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(createConnectionError(channelName)))
+      } 
+    }
+  }
+  fun onOverlayTextSubmitted(textArg: String, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayTextSubmitted$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(textArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(createConnectionError(channelName)))
+      } 
+    }
+  }
+  fun onOverlayInputModeChanged(modeArg: String, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayInputModeChanged$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(modeArg)) {
       if (it is List<*>) {
         if (it.size > 1) {
           callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))

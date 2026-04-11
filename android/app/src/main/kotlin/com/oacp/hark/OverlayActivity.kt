@@ -153,6 +153,16 @@ class OverlayActivity : FlutterActivity(), HarkOverlayBridgeApi {
             Log.d(TAG, "cancelListening() → relay to main")
             mainFlutterApi?.onOverlayCancelListening { }
         }
+
+        override fun textSubmitted(text: String) {
+            Log.d(TAG, "textSubmitted() → relay to main")
+            mainFlutterApi?.onOverlayTextSubmitted(text) { }
+        }
+
+        override fun setInputMode(mode: String) {
+            Log.d(TAG, "setInputMode($mode) → relay to main")
+            mainFlutterApi?.onOverlayInputModeChanged(mode) { }
+        }
     }
 
     companion object {

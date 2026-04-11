@@ -4,13 +4,14 @@ import 'package:forui/forui.dart';
 import 'package:hark_platform/hark_platform.dart';
 
 import '../overlay_main.dart';
+import '../state/chat_state.dart';
 import 'widgets/chat_bubble.dart';
 
 /// Compact overlay panel shown when the assist gesture fires.
 ///
 /// This is a **thin UI shell** — it renders chat bubbles from state pushed
-/// by the main engine. User actions (mic tap, dismiss) are relayed to the
-/// main engine via [HarkOverlayApi].
+/// by the main engine. User actions (mic tap, dismiss, text) are relayed
+/// to the main engine via [HarkOverlayApi].
 class OverlayScreen extends ConsumerStatefulWidget {
   const OverlayScreen({super.key});
 
@@ -21,6 +22,7 @@ class OverlayScreen extends ConsumerStatefulWidget {
 class _OverlayScreenState extends ConsumerState<OverlayScreen> {
   final _overlayApi = HarkOverlayApi();
   final _scrollController = ScrollController();
+  final _textController = TextEditingController();
 
   void _dismiss() {
     _overlayApi.dismiss();
@@ -37,6 +39,20 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
     } else {
       _overlayApi.micPressed();
     }
+  }
+
+  void _onModeToggle() {
+    final display = ref.read(overlayDisplayProvider);
+    final newMode =
+        display.inputMode == InputMode.mic ? 'keyboard' : 'mic';
+    _overlayApi.setInputMode(newMode);
+  }
+
+  void _onTextSubmit(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    _overlayApi.textSubmitted(trimmed);
+    _textController.clear();
   }
 
   void _scrollToBottom() {
@@ -56,6 +72,7 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _textController.dispose();
     super.dispose();
   }
 
@@ -143,27 +160,14 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
                       ),
                     ],
                     const SizedBox(height: 12),
-                    // Mic button.
-                    Material(
-                      color: display.isListening
-                          ? colors.destructive
-                          : colors.primary,
-                      shape: const CircleBorder(),
-                      child: InkWell(
-                        onTap: _onMicTap,
-                        customBorder: const CircleBorder(),
-                        child: SizedBox(
-                          width: 64,
-                          height: 64,
-                          child: Icon(
-                            display.isListening ? Icons.stop : Icons.mic,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                      ),
+                    // Composer — mic mode or keyboard mode.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: display.inputMode == InputMode.mic
+                          ? _buildMicComposer(display, colors)
+                          : _buildKeyboardComposer(display, colors),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     // Open full app.
                     FButton(
                       onPress: _openFullApp,
@@ -183,6 +187,80 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Mic mode: centered mic button with keyboard toggle.
+  Widget _buildMicComposer(OverlayDisplayState display, dynamic colors) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Expanded(child: SizedBox.shrink()),
+        // Mic button.
+        Material(
+          color: display.isListening ? colors.destructive : colors.primary,
+          shape: const CircleBorder(),
+          child: InkWell(
+            onTap: display.isEnabled ? _onMicTap : null,
+            customBorder: const CircleBorder(),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: Icon(
+                display.isListening ? Icons.stop : Icons.mic,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: FButton.icon(
+                onPress: _onModeToggle,
+                child: const Icon(FIcons.keyboard),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Keyboard mode: text field with mic toggle and send button.
+  Widget _buildKeyboardComposer(
+    OverlayDisplayState display,
+    dynamic colors,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Back-to-mic toggle.
+        FButton.icon(
+          onPress: _onModeToggle,
+          child: const Icon(FIcons.mic),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: FTextField(
+            control: FTextFieldControl.managed(controller: _textController),
+            hint: 'Type a command…',
+            textInputAction: TextInputAction.send,
+            enabled: display.isEnabled,
+            onSubmit: _onTextSubmit,
+          ),
+        ),
+        const SizedBox(width: 8),
+        FButton.icon(
+          onPress: display.isEnabled
+              ? () => _onTextSubmit(_textController.text)
+              : null,
+          child: const Icon(FIcons.send),
+        ),
+      ],
     );
   }
 }

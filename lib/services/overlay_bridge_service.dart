@@ -8,7 +8,7 @@ import '../state/chat_state.dart';
 /// Bridges the main engine's [ChatNotifier] with the overlay engine via
 /// native Pigeon relay.
 ///
-/// **Inbound:** Receives overlay actions (mic pressed, cancel, open/dismiss)
+/// **Inbound:** Receives overlay actions (mic pressed, cancel, text, mode)
 /// from native via [HarkMainFlutterApi] and delegates to [ChatNotifier].
 ///
 /// **Outbound:** Watches [chatProvider] and pushes state updates to native
@@ -41,6 +41,8 @@ class OverlayBridgeService extends Notifier<bool>
     state = true;
     // Push current state immediately so overlay has content.
     _pushState(ref.read(chatProvider));
+    // Auto-start mic on overlay open.
+    ref.read(chatProvider.notifier).onMicPressed();
   }
 
   @override
@@ -59,6 +61,23 @@ class OverlayBridgeService extends Notifier<bool>
   void onOverlayCancelListening() {
     debugPrint('OverlayBridge: cancel listening from overlay');
     ref.read(chatProvider.notifier).cancelListening();
+  }
+
+  @override
+  void onOverlayTextSubmitted(String text) {
+    debugPrint('OverlayBridge: text submitted from overlay: $text');
+    ref.read(chatProvider.notifier).onTextSubmitted(text);
+  }
+
+  @override
+  void onOverlayInputModeChanged(String mode) {
+    debugPrint('OverlayBridge: input mode changed to $mode');
+    final inputMode = mode == 'keyboard' ? InputMode.keyboard : InputMode.mic;
+    ref.read(chatProvider.notifier).setInputMode(inputMode);
+    // Auto-start listening when switching back to mic.
+    if (inputMode == InputMode.mic) {
+      ref.read(chatProvider.notifier).onMicPressed();
+    }
   }
 
   // ── Push state to overlay engine via native relay ──────────────
@@ -81,7 +100,9 @@ class OverlayBridgeService extends Notifier<bool>
         messages: messages,
         isListening: chat.isListening,
         isThinking: chat.isThinking,
+        isInitializing: chat.isInitializing,
         statusText: chat.statusText,
+        inputMode: chat.inputMode == InputMode.keyboard ? 'keyboard' : 'mic',
       ));
     } catch (e) {
       debugPrint('OverlayBridge: push failed: $e');

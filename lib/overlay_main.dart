@@ -28,13 +28,19 @@ class OverlayDisplayState {
     this.messages = const [],
     this.isListening = false,
     this.isThinking = false,
+    this.isInitializing = false,
     this.statusText = 'Tap to speak',
+    this.inputMode = InputMode.mic,
   });
 
   final List<ChatMessage> messages;
   final bool isListening;
   final bool isThinking;
+  final bool isInitializing;
   final String statusText;
+  final InputMode inputMode;
+
+  bool get isEnabled => !isInitializing && !isThinking;
 
   static const empty = OverlayDisplayState();
 }
@@ -69,7 +75,11 @@ class OverlayDisplayNotifier extends Notifier<OverlayDisplayState>
       messages: stateMsg.messages.map(_toMessage).toList(),
       isListening: stateMsg.isListening,
       isThinking: stateMsg.isThinking,
+      isInitializing: stateMsg.isInitializing,
       statusText: stateMsg.statusText,
+      inputMode: stateMsg.inputMode == 'keyboard'
+          ? InputMode.keyboard
+          : InputMode.mic,
     );
   }
 

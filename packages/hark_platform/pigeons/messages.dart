@@ -83,13 +83,17 @@ class OverlayStateMessage {
     required this.messages,
     required this.isListening,
     required this.isThinking,
+    required this.isInitializing,
     required this.statusText,
+    required this.inputMode,
   });
 
   final List<OverlayChatMessage> messages;
   final bool isListening;
   final bool isThinking;
+  final bool isInitializing;
   final String statusText;
+  final String inputMode; // "mic" | "keyboard"
 }
 
 // ── Cross-engine API (registered by plugin on every engine) ──────
@@ -123,6 +127,8 @@ abstract class HarkOverlayApi {
   void openFullApp();
   void micPressed();
   void cancelListening();
+  void textSubmitted(String text);
+  void setInputMode(String mode);
 }
 
 // ── Main engine → Native (push state for overlay relay) ─────────
@@ -154,6 +160,8 @@ abstract class HarkOverlayFlutterApi {
 abstract class HarkMainFlutterApi {
   void onOverlayMicPressed();
   void onOverlayCancelListening();
+  void onOverlayTextSubmitted(String text);
+  void onOverlayInputModeChanged(String mode);
   void onOverlayOpened();
   void onOverlayDismissed();
 }
