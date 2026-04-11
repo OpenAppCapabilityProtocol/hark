@@ -317,6 +317,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
         state = state.copyWith(isListening: false);
 
+        // Resume wake word now that STT is done.
+        _commonApi.setWakeWordPaused(false);
+
         if (transcript.isNotEmpty) {
           // Finalize the pending user bubble in place.
           if (finalizingId != null) {
