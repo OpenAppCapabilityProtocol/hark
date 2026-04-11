@@ -35,6 +35,8 @@ class WakeWordDetector(private val context: Context) {
     private var threshold: Float = 0.5f
     private var isPaused = false
 
+    // TODO: isRunning returns false during pause (engine is null). A future
+    // settings UI should use a separate "isEnabled" flag to track intent vs state.
     val isRunning: Boolean get() = engine != null
 
     /**

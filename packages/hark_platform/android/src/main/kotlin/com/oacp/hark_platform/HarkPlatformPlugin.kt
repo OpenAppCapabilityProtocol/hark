@@ -379,6 +379,8 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
 
     private var wakeWordDetector: WakeWordDetector? = null
 
+    // TODO: startWakeWordService silently fails if context is null (detached
+    // engine). Consider returning a Result or throwing so Dart knows it failed.
     override fun startWakeWordService() {
         val ctx = context ?: return
         if (wakeWordDetector?.isRunning == true) return

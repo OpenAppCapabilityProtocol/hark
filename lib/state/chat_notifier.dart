@@ -318,6 +318,9 @@ class ChatNotifier extends Notifier<ChatState> {
         state = state.copyWith(isListening: false);
 
         // Resume wake word now that STT is done.
+        // TODO: This fires before _processTranscript completes. If the user
+        // says "Hey Hark" during TTS response, it triggers a new mic session
+        // overlapping with speech. Consider delaying resume until after TTS.
         _commonApi.setWakeWordPaused(false);
 
         if (transcript.isNotEmpty) {
