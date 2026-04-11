@@ -3,14 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:hark_platform/hark_platform.dart';
 
-import '../state/chat_notifier.dart';
-import '../state/chat_state.dart';
+import '../overlay_main.dart';
+import 'widgets/chat_bubble.dart';
 
 /// Compact overlay panel shown when the assist gesture fires.
 ///
-/// Renders a bottom sheet card with mic button, status text, transcript,
-/// and result. Tapping the scrim area dismisses back to the home screen.
-/// "Open full app" tells the native side to launch MainActivity.
+/// This is a **thin UI shell** — it renders chat bubbles from state pushed
+/// by the main engine. User actions (mic tap, dismiss) are relayed to the
+/// main engine via [HarkOverlayApi].
 class OverlayScreen extends ConsumerStatefulWidget {
   const OverlayScreen({super.key});
 
@@ -20,12 +20,9 @@ class OverlayScreen extends ConsumerStatefulWidget {
 
 class _OverlayScreenState extends ConsumerState<OverlayScreen> {
   final _overlayApi = HarkOverlayApi();
+  final _scrollController = ScrollController();
 
   void _dismiss() {
-    final chatState = ref.read(chatProvider);
-    if (chatState.isListening) {
-      ref.read(chatProvider.notifier).cancelListening();
-    }
     _overlayApi.dismiss();
   }
 
@@ -34,32 +31,51 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
   }
 
   void _onMicTap() {
-    ref.read(chatProvider.notifier).onMicPressed();
+    final display = ref.read(overlayDisplayProvider);
+    if (display.isListening) {
+      _overlayApi.cancelListening();
+    } else {
+      _overlayApi.micPressed();
+    }
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final chat = ref.watch(chatProvider);
+    final display = ref.watch(overlayDisplayProvider);
     final colors = context.theme.colors;
     final typography = context.theme.typography;
 
-    // Find the latest user pending message (live transcript).
-    final liveTranscript = chat.messages
-        .where((m) => m.role == ChatRole.user && m.isPending)
-        .lastOrNull
-        ?.text;
-
-    // Find the latest assistant message (result).
-    final lastResult = chat.messages
-        .where((m) => m.role == ChatRole.assistant && !m.isPending)
-        .lastOrNull
-        ?.text;
+    // Auto-scroll when messages change.
+    ref.listen(
+      overlayDisplayProvider.select((s) => s.messages.length),
+      (_, _) => _scrollToBottom(),
+    );
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Column(
         children: [
-          // Scrim area — tap to dismiss
+          // Scrim area — tap to dismiss.
           Expanded(
             child: GestureDetector(
               onTap: _dismiss,
@@ -67,79 +83,69 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
               child: const SizedBox.expand(),
             ),
           ),
-          // Bottom sheet card
-          Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: colors.background,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
+          // Bottom sheet card.
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.65,
             ),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: colors.background,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Drag handle
-                    Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: colors.mutedForeground.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(2),
+                    // Drag handle.
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 12),
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color:
+                              colors.mutedForeground.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    // Status
-                    Text(
-                      chat.statusText,
-                      style: typography.sm.copyWith(
-                        color: colors.mutedForeground,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    // Live transcript
-                    if (liveTranscript != null &&
-                        liveTranscript.isNotEmpty) ...[
-                      Text(
-                        '"$liveTranscript"',
+                    // Status text.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        display.statusText,
                         style: typography.sm.copyWith(
-                          color: colors.foreground,
-                          fontStyle: FontStyle.italic,
+                          color: colors.mutedForeground,
                         ),
                         textAlign: TextAlign.center,
                       ),
+                    ),
+                    // Chat messages.
+                    if (display.messages.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                    ],
-                    // Result
-                    if (lastResult != null &&
-                        lastResult.isNotEmpty &&
-                        !chat.isListening) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: colors.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          lastResult,
-                          style: typography.sm.copyWith(
-                            color: colors.foreground,
-                          ),
-                          textAlign: TextAlign.center,
+                      Flexible(
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: display.messages.length,
+                          itemBuilder: (_, index) {
+                            return ChatBubble(
+                              message: display.messages[index],
+                            );
+                          },
                         ),
                       ),
-                      const SizedBox(height: 12),
                     ],
-                    const SizedBox(height: 8),
-                    // Mic button
+                    const SizedBox(height: 12),
+                    // Mic button.
                     Material(
-                      color: chat.isListening
+                      color: display.isListening
                           ? colors.destructive
                           : colors.primary,
                       shape: const CircleBorder(),
@@ -150,15 +156,15 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
                           width: 64,
                           height: 64,
                           child: Icon(
-                            chat.isListening ? Icons.stop : Icons.mic,
+                            display.isListening ? Icons.stop : Icons.mic,
                             color: Colors.white,
                             size: 28,
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    // Open full app
+                    const SizedBox(height: 8),
+                    // Open full app.
                     FButton(
                       onPress: _openFullApp,
                       variant: FButtonVariant.ghost,
@@ -169,6 +175,7 @@ class _OverlayScreenState extends ConsumerState<OverlayScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),

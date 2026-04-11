@@ -4,53 +4,97 @@ import 'package:forui/forui.dart';
 import 'package:hark_platform/hark_platform.dart';
 
 import 'screens/overlay_screen.dart';
+import 'state/chat_state.dart';
 import 'theme/hark_theme.dart';
 
 /// Dart entrypoint for the overlay FlutterEngine.
 ///
-/// Runs on its own engine (separate from the main app) and only renders the
-/// compact overlay panel. The native side calls [HarkOverlayFlutterApi.onNewSession]
-/// on each assist gesture to reset overlay state.
+/// This is a **thin UI shell** — no models, no STT, no TTS. All voice
+/// processing happens on the main engine. State is pushed from the main
+/// engine via [HarkOverlayFlutterApi.onStateUpdate].
 @pragma('vm:entry-point')
 Future<void> overlayMain() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const ProviderScope(child: OverlayApp()));
 }
 
-/// Provider for the overlay session notifier. The overlay screen watches this
-/// to know when a new assist session has started (and should reset state).
-final overlaySessionProvider =
-    NotifierProvider<OverlaySessionNotifier, String?>(
-  OverlaySessionNotifier.new,
+// ── Overlay display state ──────────────────────────────────────────
+
+/// Lightweight state for the overlay display. Mirrors the main engine's
+/// [ChatState] but only contains what the overlay needs to render.
+@immutable
+class OverlayDisplayState {
+  const OverlayDisplayState({
+    this.messages = const [],
+    this.isListening = false,
+    this.isThinking = false,
+    this.statusText = 'Tap to speak',
+  });
+
+  final List<ChatMessage> messages;
+  final bool isListening;
+  final bool isThinking;
+  final String statusText;
+
+  static const empty = OverlayDisplayState();
+}
+
+// ── Overlay display notifier ───────────────────────────────────────
+
+/// Receives state updates from the main engine and session lifecycle
+/// events from native. The overlay screen watches this provider.
+final overlayDisplayProvider =
+    NotifierProvider<OverlayDisplayNotifier, OverlayDisplayState>(
+  OverlayDisplayNotifier.new,
 );
 
-/// Tracks the current overlay session ID from native.
-///
-/// When the native side fires [HarkOverlayFlutterApi.onNewSession], we update
-/// the session ID. Watchers can react to the change and reset their state.
-class OverlaySessionNotifier extends Notifier<String?>
+class OverlayDisplayNotifier extends Notifier<OverlayDisplayState>
     implements HarkOverlayFlutterApi {
   @override
-  String? build() {
+  OverlayDisplayState build() {
     HarkOverlayFlutterApi.setUp(this);
     ref.onDispose(() => HarkOverlayFlutterApi.setUp(null));
-    return null;
+    return const OverlayDisplayState();
   }
 
   @override
   void onNewSession(String sessionId) {
-    state = sessionId;
+    debugPrint('OverlayDisplay: new session $sessionId');
+    state = const OverlayDisplayState();
+  }
+
+  @override
+  void onStateUpdate(OverlayStateMessage stateMsg) {
+    state = OverlayDisplayState(
+      messages: stateMsg.messages.map(_toMessage).toList(),
+      isListening: stateMsg.isListening,
+      isThinking: stateMsg.isThinking,
+      statusText: stateMsg.statusText,
+    );
+  }
+
+  static ChatMessage _toMessage(OverlayChatMessage m) {
+    return ChatMessage(
+      id: m.id,
+      role: m.role == 'user' ? ChatRole.user : ChatRole.assistant,
+      text: m.text,
+      isPending: m.isPending,
+      isError: m.isError,
+      metadata: m.metadata,
+      sourceAppName: m.sourceAppName,
+    );
   }
 }
 
-/// Minimal app shell for the overlay — only renders [OverlayScreen].
+// ── Overlay app shell ──────────────────────────────────────────────
+
 class OverlayApp extends ConsumerWidget {
   const OverlayApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Eagerly initialize so the FlutterApi handler is registered.
-    ref.watch(overlaySessionProvider);
+    ref.watch(overlayDisplayProvider);
 
     final theme = buildHarkTheme();
     return MaterialApp(

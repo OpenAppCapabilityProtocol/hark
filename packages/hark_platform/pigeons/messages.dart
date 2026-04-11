@@ -56,6 +56,42 @@ class OacpResultMessage {
   final String? result;
 }
 
+// ── Overlay state sync data ─────────────────────────────────────
+
+class OverlayChatMessage {
+  const OverlayChatMessage({
+    required this.id,
+    required this.role,
+    required this.text,
+    required this.isPending,
+    required this.isError,
+    this.metadata,
+    this.sourceAppName,
+  });
+
+  final String id;
+  final String role; // "user" | "assistant"
+  final String text;
+  final bool isPending;
+  final bool isError;
+  final String? metadata;
+  final String? sourceAppName;
+}
+
+class OverlayStateMessage {
+  const OverlayStateMessage({
+    required this.messages,
+    required this.isListening,
+    required this.isThinking,
+    required this.statusText,
+  });
+
+  final List<OverlayChatMessage> messages;
+  final bool isListening;
+  final bool isThinking;
+  final String statusText;
+}
+
 // ── Cross-engine API (registered by plugin on every engine) ──────
 
 @HostApi()
@@ -79,12 +115,22 @@ abstract class HarkCommonApi {
   bool deleteBackup(String fileName);
 }
 
-// ── Overlay-specific (registered by OverlayActivity) ─────────────
+// ── Overlay → Native (registered by OverlayActivity) ────────────
 
 @HostApi()
 abstract class HarkOverlayApi {
   void dismiss();
   void openFullApp();
+  void micPressed();
+  void cancelListening();
+}
+
+// ── Main engine → Native (push state for overlay relay) ─────────
+
+@HostApi()
+abstract class HarkOverlayBridgeApi {
+  void pushStateToOverlay(OverlayStateMessage state);
+  void notifyOverlayActive(bool active);
 }
 
 // ── Main-specific (registered by MainActivity) ───────────────────
@@ -94,11 +140,22 @@ abstract class HarkMainApi {
   void openAssistantSettings();
 }
 
-// ── Native → Dart: overlay session lifecycle ─────────────────────
+// ── Native → Overlay engine: session + state updates ────────────
 
 @FlutterApi()
 abstract class HarkOverlayFlutterApi {
   void onNewSession(String sessionId);
+  void onStateUpdate(OverlayStateMessage state);
+}
+
+// ── Native → Main engine: relay overlay actions ─────────────────
+
+@FlutterApi()
+abstract class HarkMainFlutterApi {
+  void onOverlayMicPressed();
+  void onOverlayCancelListening();
+  void onOverlayOpened();
+  void onOverlayDismissed();
 }
 
 // ── Native → Dart: OACP result broadcast forwarding ──────────────

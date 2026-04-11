@@ -4,6 +4,7 @@ import 'package:forui/forui.dart';
 
 import 'overlay_main.dart' as overlay;
 import 'router/hark_router.dart';
+import 'services/overlay_bridge_service.dart';
 import 'theme/hark_theme.dart';
 
 // Force the compiler to include overlay_main.dart in the kernel snapshot.
@@ -21,6 +22,10 @@ class HarkApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Eagerly initialize the overlay bridge so it's ready when
+    // the overlay opens and can receive/relay actions immediately.
+    ref.watch(overlayBridgeProvider);
+
     final theme = buildHarkTheme();
     final router = ref.watch(goRouterProvider);
     return MaterialApp.router(

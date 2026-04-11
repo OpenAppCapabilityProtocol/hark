@@ -153,6 +153,93 @@ class OacpResultMessage {
   }
 }
 
+class OverlayChatMessage {
+  OverlayChatMessage({
+    required this.id,
+    required this.role,
+    required this.text,
+    required this.isPending,
+    required this.isError,
+    this.metadata,
+    this.sourceAppName,
+  });
+
+  String id;
+
+  String role;
+
+  String text;
+
+  bool isPending;
+
+  bool isError;
+
+  String? metadata;
+
+  String? sourceAppName;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      role,
+      text,
+      isPending,
+      isError,
+      metadata,
+      sourceAppName,
+    ];
+  }
+
+  static OverlayChatMessage decode(Object result) {
+    result as List<Object?>;
+    return OverlayChatMessage(
+      id: result[0]! as String,
+      role: result[1]! as String,
+      text: result[2]! as String,
+      isPending: result[3]! as bool,
+      isError: result[4]! as bool,
+      metadata: result[5] as String?,
+      sourceAppName: result[6] as String?,
+    );
+  }
+}
+
+class OverlayStateMessage {
+  OverlayStateMessage({
+    required this.messages,
+    required this.isListening,
+    required this.isThinking,
+    required this.statusText,
+  });
+
+  List<OverlayChatMessage> messages;
+
+  bool isListening;
+
+  bool isThinking;
+
+  String statusText;
+
+  Object encode() {
+    return <Object?>[
+      messages,
+      isListening,
+      isThinking,
+      statusText,
+    ];
+  }
+
+  static OverlayStateMessage decode(Object result) {
+    result as List<Object?>;
+    return OverlayStateMessage(
+      messages: (result[0] as List<Object?>?)!.cast<OverlayChatMessage>(),
+      isListening: result[1]! as bool,
+      isThinking: result[2]! as bool,
+      statusText: result[3]! as String,
+    );
+  }
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -170,6 +257,12 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is OacpResultMessage) {
       buffer.putUint8(131);
       writeValue(buffer, value.encode());
+    }    else if (value is OverlayChatMessage) {
+      buffer.putUint8(132);
+      writeValue(buffer, value.encode());
+    }    else if (value is OverlayStateMessage) {
+      buffer.putUint8(133);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -184,6 +277,10 @@ class _PigeonCodec extends StandardMessageCodec {
         return BackupInfo.decode(readValue(buffer)!);
       case 131: 
         return OacpResultMessage.decode(readValue(buffer)!);
+      case 132: 
+        return OverlayChatMessage.decode(readValue(buffer)!);
+      case 133: 
+        return OverlayStateMessage.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -412,6 +509,108 @@ class HarkOverlayApi {
       return;
     }
   }
+
+  Future<void> micPressed() async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.hark_platform.HarkOverlayApi.micPressed$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(null) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> cancelListening() async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.hark_platform.HarkOverlayApi.cancelListening$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(null) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+}
+
+class HarkOverlayBridgeApi {
+  /// Constructor for [HarkOverlayBridgeApi].  The [binaryMessenger] named argument is
+  /// available for dependency injection.  If it is left null, the default
+  /// BinaryMessenger will be used which routes to the host platform.
+  HarkOverlayBridgeApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+      : pigeonVar_binaryMessenger = binaryMessenger,
+        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+  final BinaryMessenger? pigeonVar_binaryMessenger;
+
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  final String pigeonVar_messageChannelSuffix;
+
+  Future<void> pushStateToOverlay(OverlayStateMessage state) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.hark_platform.HarkOverlayBridgeApi.pushStateToOverlay$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[state]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> notifyOverlayActive(bool active) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.hark_platform.HarkOverlayBridgeApi.notifyOverlayActive$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[active]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
 }
 
 class HarkMainApi {
@@ -455,6 +654,8 @@ abstract class HarkOverlayFlutterApi {
 
   void onNewSession(String sessionId);
 
+  void onStateUpdate(OverlayStateMessage state);
+
   static void setUp(HarkOverlayFlutterApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
     messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
     {
@@ -473,6 +674,123 @@ abstract class HarkOverlayFlutterApi {
               'Argument for dev.flutter.pigeon.hark_platform.HarkOverlayFlutterApi.onNewSession was null, expected non-null String.');
           try {
             api.onNewSession(arg_sessionId!);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.hark_platform.HarkOverlayFlutterApi.onStateUpdate$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          assert(message != null,
+          'Argument for dev.flutter.pigeon.hark_platform.HarkOverlayFlutterApi.onStateUpdate was null.');
+          final List<Object?> args = (message as List<Object?>?)!;
+          final OverlayStateMessage? arg_state = (args[0] as OverlayStateMessage?);
+          assert(arg_state != null,
+              'Argument for dev.flutter.pigeon.hark_platform.HarkOverlayFlutterApi.onStateUpdate was null, expected non-null OverlayStateMessage.');
+          try {
+            api.onStateUpdate(arg_state!);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+  }
+}
+
+abstract class HarkMainFlutterApi {
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  void onOverlayMicPressed();
+
+  void onOverlayCancelListening();
+
+  void onOverlayOpened();
+
+  void onOverlayDismissed();
+
+  static void setUp(HarkMainFlutterApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
+    messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayMicPressed$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          try {
+            api.onOverlayMicPressed();
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayCancelListening$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          try {
+            api.onOverlayCancelListening();
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayOpened$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          try {
+            api.onOverlayOpened();
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.hark_platform.HarkMainFlutterApi.onOverlayDismissed$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          try {
+            api.onOverlayDismissed();
             return wrapResponse(empty: true);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);
