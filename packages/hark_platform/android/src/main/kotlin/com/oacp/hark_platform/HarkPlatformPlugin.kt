@@ -45,6 +45,10 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
         HarkCommonApi.setUp(binding.binaryMessenger, this)
 
         resultFlutterApi = HarkResultFlutterApi(binding.binaryMessenger)
+        // TODO: With FlutterEngineGroup, this plugin registers on both engines.
+        // The broadcast receiver should ideally only exist on the main engine
+        // to avoid duplicate result delivery. Not a problem currently because
+        // the overlay engine's Dart side doesn't listen for results.
         val receiver = OacpResultBroadcastReceiver(resultFlutterApi!!)
         receiver.register(binding.applicationContext)
         resultReceiver = receiver

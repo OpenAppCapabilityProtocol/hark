@@ -43,6 +43,8 @@ class HarkApplication : Application() {
      * The overlay engine runs the `overlayMain` Dart entrypoint and shares
      * GPU context with the main engine via [FlutterEngineGroup].
      */
+    // TODO: Consider adding @Synchronized if rapid double-tap assist gesture
+    // can race two concurrent calls before the cache check.
     fun getOrCreateOverlayEngine(): FlutterEngine {
         FlutterEngineCache.getInstance().get(OVERLAY_ENGINE_ID)?.let { return it }
 

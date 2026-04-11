@@ -24,6 +24,10 @@ class OverlayBridgeService extends Notifier<bool>
     ref.onDispose(() => HarkMainFlutterApi.setUp(null));
 
     // When overlay is active, watch chat state and push updates.
+    // TODO: Consider adding a ~50ms debounce timer here. During STT
+    // streaming, partials arrive at 10-20Hz and each triggers a full
+    // state serialize + Pigeon channel send. Not a problem observed
+    // in testing but worth revisiting under load.
     ref.listen<ChatState>(chatProvider, (_, next) {
       if (state) {
         _pushState(next);
