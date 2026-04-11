@@ -391,7 +391,7 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
             },
             // Use hello_world.onnx as placeholder until hey_hark.onnx is trained.
             modelPath = "wakeword/hello_world.onnx",
-            threshold = 0.5f,
+            threshold = 0.3f,
         )
         wakeWordDetector = detector
         Log.i(TAG, "Wake word service started")

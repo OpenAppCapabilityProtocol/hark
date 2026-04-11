@@ -76,7 +76,7 @@ class WakeWordDetector(private val context: Context) {
             context = context,
             models = models,
             detectionMode = DetectionMode.SINGLE_BEST,
-            detectionCooldownMs = 3000L,
+            detectionCooldownMs = 1500L,
             scope = engineScope,
         )
         engine = wakeEngine
