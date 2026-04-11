@@ -133,6 +133,14 @@ class ChatNotifier extends Notifier<ChatState> {
 
       await _checkDefaultAssistant();
 
+      // Start wake word detection after init completes.
+      try {
+        _commonApi.startWakeWordService();
+        debugPrint('ChatNotifier: wake word detection started');
+      } catch (e) {
+        debugPrint('ChatNotifier: wake word start failed: $e');
+      }
+
       // Success: drop any prior init error so the UI can clear its banner.
       state = state.copyWith(
         isInitializing: false,
