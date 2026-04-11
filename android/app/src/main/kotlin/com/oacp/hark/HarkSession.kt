@@ -27,6 +27,10 @@ class HarkSession(context: Context) : VoiceInteractionSession(context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch OverlayActivity", e)
         }
+
+        // Close the session window so it doesn't sit on top of
+        // OverlayActivity and intercept all touch events.
+        finish()
     }
 
     override fun onHide() {
