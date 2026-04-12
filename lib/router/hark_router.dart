@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../screens/available_actions_screen.dart';
 import '../screens/chat_screen.dart';
+import '../screens/settings_screen.dart';
 import '../screens/splash_screen.dart';
 import '../state/init_notifier.dart';
 
@@ -15,6 +16,7 @@ class HarkRoutes {
   static const splash = '/';
   static const chat = '/chat';
   static const actions = '/actions';
+  static const settings = '/settings';
 }
 
 /// Provides the app's singleton [GoRouter].
@@ -65,6 +67,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: HarkRoutes.actions,
         name: 'actions',
         builder: (_, _) => const AvailableActionsScreen(),
+      ),
+      GoRoute(
+        path: HarkRoutes.settings,
+        name: 'settings',
+        builder: (_, _) => const SettingsScreen(),
       ),
     ],
   );

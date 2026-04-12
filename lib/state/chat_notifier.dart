@@ -22,6 +22,7 @@ import 'init_notifier.dart';
 import 'registry_provider.dart';
 import 'resolver_provider.dart';
 import 'services_providers.dart';
+import 'settings_notifier.dart';
 import 'slot_filling_notifier.dart';
 
 /// Owns all chat business logic for the Hark voice assistant screen.
@@ -151,10 +152,16 @@ class ChatNotifier extends Notifier<ChatState> {
         await Permission.notification.request();
       }
 
-      // Start wake word detection after init completes.
+      // Start wake word detection after init completes, but only if the
+      // user hasn't disabled it from the Settings screen.
       try {
-        _commonApi.startWakeWordService();
-        debugPrint('ChatNotifier: wake word detection started');
+        final wakeWordEnabled = await readWakeWordEnabledPref();
+        if (wakeWordEnabled) {
+          _commonApi.startWakeWordService();
+          debugPrint('ChatNotifier: wake word detection started');
+        } else {
+          debugPrint('ChatNotifier: wake word disabled by user preference');
+        }
       } catch (e) {
         debugPrint('ChatNotifier: wake word start failed: $e');
       }
