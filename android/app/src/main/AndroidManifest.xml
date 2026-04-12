@@ -5,6 +5,10 @@
     <!-- Model backup persistence to Downloads/local-llm/ (pre-Android 10) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- Wake word foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="Hark"
         android:name=".HarkApplication"
@@ -71,6 +75,13 @@
             </intent-filter>
         </service>
 
+        <!-- Wake word foreground service — keeps "Hey Hark" detection alive
+             and shows a persistent notification while listening. -->
+        <service
+            android:name=".WakeWordService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
+
         <!-- Dedicated overlay Activity for the assistant panel.
              Translucent theme applied statically — no runtime switching. -->
         <activity
@@ -78,6 +89,8 @@
             android:theme="@style/OverlayTheme"
             android:launchMode="singleTop"
             android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
             android:exported="false"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true" />

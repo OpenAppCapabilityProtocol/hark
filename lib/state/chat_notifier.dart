@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hark_platform/hark_platform.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -52,6 +52,7 @@ class ChatNotifier extends Notifier<ChatState> {
   // Transient state that doesn't belong in [ChatState].
   StreamSubscription<OacpResult>? _resultSubscription;
   StreamSubscription<void>? _wakeWordSubscription;
+  AppLifecycleListener? _lifecycleListener;
   Timer? _restartTimer;
   int _messageCounter = 0;
 
@@ -99,6 +100,7 @@ class ChatNotifier extends Notifier<ChatState> {
       _restartTimer?.cancel();
       _resultSubscription?.cancel();
       _wakeWordSubscription?.cancel();
+      _lifecycleListener?.dispose();
       // Do NOT dispose STT/TTS/etc — they are owned by their own providers.
     });
 
@@ -122,8 +124,10 @@ class ChatNotifier extends Notifier<ChatState> {
 
       _resultSubscription = _resultService.results.listen(_onOacpResult);
       _wakeWordSubscription = _resultService.wakeWordDetections.listen((_) {
-        debugPrint('ChatNotifier: wake word detected, auto-starting mic');
-        onMicPressed();
+        debugPrint('ChatNotifier: wake word detected — overlay launching');
+        // Overlay launch is handled natively (showSession → HarkSession →
+        // OverlayActivity). The overlay's onOverlayOpened callback triggers
+        // mic start via the bridge. No onMicPressed() here.
       });
 
       final sttInit = await _sttService.initialize();
@@ -133,6 +137,14 @@ class ChatNotifier extends Notifier<ChatState> {
 
       await _checkDefaultAssistant();
 
+      // Request notification permission so the wake word foreground
+      // service can show its "Listening for Hey Hark" notification.
+      // Required on Android 13+; silently no-ops on older versions.
+      final notifStatus = await Permission.notification.status;
+      if (!notifStatus.isGranted) {
+        await Permission.notification.request();
+      }
+
       // Start wake word detection after init completes.
       try {
         _commonApi.startWakeWordService();
@@ -140,6 +152,10 @@ class ChatNotifier extends Notifier<ChatState> {
       } catch (e) {
         debugPrint('ChatNotifier: wake word start failed: $e');
       }
+
+      // Refresh capabilities when the app returns to the foreground so
+      // installs, uninstalls, and manifest changes are picked up.
+      _lifecycleListener = AppLifecycleListener(onResume: _onAppResumed);
 
       // Success: drop any prior init error so the UI can clear its banner.
       state = state.copyWith(
@@ -604,6 +620,28 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> _checkDefaultAssistant() async {
     final result = await _commonApi.isDefaultAssistant();
     state = state.copyWith(isDefaultAssistant: result);
+  }
+
+  /// Re-discovers OACP capabilities when the app resumes from background.
+  /// Catches app installs, uninstalls, and manifest changes.
+  Future<void> _onAppResumed() async {
+    if (_registry == null || state.isInitializing) return;
+
+    debugPrint('ChatNotifier: app resumed, refreshing capabilities');
+    ref.invalidate(capabilityRegistryProvider);
+    try {
+      final registry = await ref.read(capabilityRegistryProvider.future);
+      _registry = registry;
+
+      if (registry.hasAvailableActions) {
+        final nluResolver = ref.read(nluResolverProvider);
+        await nluResolver.preWarmEmbeddings(registry.actions);
+      }
+
+      state = state.copyWith(statusText: _idleStatusText());
+    } catch (e) {
+      debugPrint('ChatNotifier: capability refresh failed: $e');
+    }
   }
 
   // ---------------------------------------------------------------------------
