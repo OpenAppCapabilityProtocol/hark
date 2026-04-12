@@ -16,7 +16,7 @@ For the OACP protocol roadmap, see [OpenAppCapabilityProtocol/oacp](https://gith
 - Confidence-gated matching (semantic score >= 0.35)
 - Intent dispatch via broadcast (background) and activity (foreground)
 - Async result handling: apps return data, Hark shows + speaks it
-- System voice assistant registration (VoiceInteractionService)
+- System voice assistant registration (VoiceInteractionService + RoleManager)
 - Continuous listening mode from assistant gesture
 - Multi-model support with persistent model backup
 - Inference logging for debugging and model comparison
@@ -24,167 +24,149 @@ For the OACP protocol roadmap, see [OpenAppCapabilityProtocol/oacp](https://gith
 - Assist overlay via FlutterEngineGroup: thin UI shell with zero model loading, instant launch on assist gesture
 - Type-safe Dart/Kotlin bindings via hark_platform plugin (Pigeon), replacing all raw MethodChannel/EventChannel code
 - Two-engine architecture: main engine (full processing) + overlay engine (UI shell), state relayed through native Pigeon bridge
+- **Wake word "Hey Hark"** via openWakeWord with custom-trained `hey_harkh.onnx` (201KB)
+- **Wake word foreground service** with persistent notification, Stop action, and `START_STICKY` restart
+- **Wake word → overlay launch** via `VoiceInteractionService.showSession()` (system-sanctioned background activity path)
+- **Lifecycle capability refresh**: OACP registry re-scans on app resume, so uninstalled apps drop out without a restart
 
 ---
 
 ## Current Priorities
 
-Build these next, in order:
+The near-term foundation (overlay, wake word, two-stage NLU) is shipped. Current focus is polish, user-facing controls, and a few targeted UX gaps before scope expands.
 
-### 1. Self-Hosted Inference
-
-Status: `[ ]`
-
-Connect Hark to Ollama, LM Studio, or any OpenAI-compatible endpoint on the user's local network.
-
-- [ ] Settings screen for inference mode selection (local / self-hosted / cloud)
-- [ ] Provider interface that all backends implement
-- [ ] Self-hosted mode: URL input, connection test, OpenAI-compatible API client
-- [ ] Feed `OACP.md` content to self-hosted providers (larger context budget)
-- [ ] Graceful fallback: self-hosted unavailable -> local
-
-**Why this is #1**: Unlimited context, reliable parameter extraction, OACP.md consumption, zero cost. A $200 old laptop with 16GB RAM can serve the household.
-
-### 2. BYOK Cloud API Keys
+### 1. Settings Screen
 
 Status: `[ ]`
 
-- [ ] API key input for OpenAI, Gemini, Anthropic
-- [ ] Secure storage for keys
-- [ ] Cloud quota fallback -> local
+Users currently have no in-app way to inspect permissions, toggle wake word, or see model status. This is the next thing to build.
 
-### 3. Better STT
+- [ ] `/settings` route with forui tiles
+- [ ] Permissions section (live status + tap to grant): mic, notifications, default assistant
+- [ ] Wake word toggle (start/stop service) with persistent preference
+- [ ] Model info (embedding, slot filling, wake word versions)
+- [ ] About section (version, OACP spec link, GitHub link)
 
-Status: `[ ]`
-
-- [ ] Evaluate whisper.cpp / sherpa-onnx for on-device speech recognition
-- [ ] Eliminate Android system beep on listen start
-- [ ] Enable true continuous listening without system STT limitations
-
-### 4. Model Loading Performance, measurement + decision in progress
-
-Status: `[-]`
-
-Before the overlay ships, cold start needs to feel instant. The original plan here was a hard llamadart migration. Slice 0 (the quantization benchmark harness) ran and produced a concrete verdict (see [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md)):
-- **EmbeddingGemma 300M Q8_0 via llamadart**: clean win. 3.7s cold load + 150ms embed on Moto G56, quality identical to ONNX baseline.
-- **Qwen3 0.6B Q8_0 via llamadart for slot filling**: hardware-bound on mid-range Android. 27-30s per case on the Moto G56 CPU. The bottleneck is compute on prompt processing, not memory bandwidth, so no quant trick breaks the wall. Slot-filling migration is killed.
-
-The remaining question is whether the **current `flutter_embedder` + `flutter_gemma` stack** is faster, slower, or about the same as the measured llamadart numbers. We don't have clean comparison numbers yet. Until we do, the migration decision is on pause.
-
-**Near-term plan** (replaces the old 7-slice breakdown):
-
-- [x] Slice 0: Quantization benchmark harness (`tools/quant_bench/`), 20-case embedding gold set, 15-case slot-filling gold set, v3 quant matrix, decision findings in [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md). Shipped.
-- [x] Instrumentation: Stopwatch-wrapped timing around the current load path, logs to `model_load_logs/load_*.jsonl`. Shipped as the `f213e36` commit (reusable for both runtimes).
-- [x] Keyword / alias fast-path: zero-parameter commands (flashlight, pause, scan) dispatch without touching the slot-filling LLM. Shipped as the `2efe65d` commit.
-- [-] **Phase 1, Comparative measurement**: run the same bench harness (or a flutter_gemma fork of it) against the current stack on Moto G56. Produce a comparison table with concrete numbers for every cell. Write up `docs/plans/load-time-baseline.md`.
-- [ ] **Phase 2, Migration decision + load-time optimization**: based on Phase 1 data, migrate the embedder to llamadart (if clearly faster), keep the current slot filler (per Slice 0 findings), and land load-time optimizations (parallel init, persistent action embedding cache, warm engine retention). See `.claude/plans/async-twirling-galaxy.md` for the full phased plan.
-
-**Deferred**: slot-filling migration to llamadart is killed per Slice 0 findings. Smaller quants (Q4_0, Qwen2.5-0.5B Q4_K_M) were tested and don't break the hardware wall. The slot-filling workstream re-opens only if a future runtime introduces a working GPU/NPU delegate for mid-range Android.
-
-**Research preserved**:
-- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md): Track 2 research on encoder-based slot tagging as a non-LLM alternative. Parked for v2 vision.
-- [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md): original 7-slice plan, preserved for historical context.
-
-**Update:** The overlay architecture solved the cold-start problem for the assist gesture. The overlay is a thin UI shell that loads zero models, so it launches instantly. The main engine handles all model loading in the background. Remaining model loading optimizations are still valuable for the main app's splash screen, but they no longer block the overlay experience.
-
-**Why this is #4**: Measurement first, optimization second, migration only if the data supports it.
-
-### 5. Assistant Overlay
-
-Status: `[x]`
-
-- [x] Dedicated lightweight OverlayActivity (translucent FlutterActivity, separate from MainActivity)
-- [x] FlutterEngineGroup with two engines: main (full app) + overlay (thin UI shell)
-- [x] Chat bubbles with app icons, keyboard/mic toggle, auto-start mic on open
-- [x] Zero model loading in overlay, all processing stays on main engine
-- [x] State relay between engines via native Pigeon bridge through OverlayActivity
-- [x] hark_platform plugin (Pigeon) replacing all raw MethodChannel/EventChannel code
-- [x] Migrated native handlers to plugin: OacpDiscoveryHandler, LocalModelStorageHandler, OacpResultReceiver removed
-
-### 6. Wake Word
-
-Status: `[-]`
-
-**Shipped:**
-- [x] On-device wake word detection ("Hey Hark") using openWakeWord (Apache 2.0) + ONNX Runtime
-- [x] Custom-trained hey_harkh.onnx model (201KB) with melspectrogram + embedding preprocessors
-- [x] Pigeon APIs: startWakeWordService, stopWakeWordService, isWakeWordRunning, setWakeWordPaused in HarkCommonApi
-- [x] onWakeWordDetected callback in HarkResultFlutterApi, exposed as wakeWordDetections stream in OacpResultService
-- [x] ChatNotifier auto-starts mic on wake word detection
-- [x] Mutual exclusion with STT: wake word engine stops while speech recognition is active, restarts after
-- [x] Auto-starts after ChatNotifier init, engine persists in HarkApplication (works when app is backgrounded)
-
-**Remaining:**
-- [ ] Background foreground service so wake word runs even when app is fully closed
-- [ ] Wake word triggers overlay launch (not just in-app mic)
-- [ ] Settings screen: enable/disable wake word, sensitivity slider
-- [ ] Privacy controls (when is the mic active, visual indicator)
-- [ ] Battery impact measurement and controls
-- [ ] Optional hardware-aware path for supported devices
-
-### 7. Action Chips and Buttons
+### 2. Action Chips and Disambiguation
 
 Status: `[ ]`
 
 - [ ] Tappable action chips in chat bubbles for capability-help replies
-- [ ] Disambiguation buttons ("Did you mean front camera or rear camera?")
-- [ ] Follow-up suggestion chips (Google Assistant-style)
-- [ ] Protocol-driven: buttons come from discovered OACP actions, not hardcoded
+- [ ] Disambiguation buttons when top-N semantic scores are close ("Did you mean front camera or rear camera?")
+- [ ] Follow-up suggestion chips after successful actions
+- [ ] Protocol-driven: chip content comes from discovered OACP actions, not hardcoded
+
+### 3. Wake Word — polish + barge-in
+
+Status: `[-]`
+
+Core detection, foreground service, and overlay launch all shipped (PR #18 and PR #19). Remaining work is UX polish and a harder research problem around barge-in.
+
+- [ ] Sensitivity slider (threshold control) exposed via Settings
+- [ ] Privacy indicator (visible state when mic is hot)
+- [ ] Battery impact measurement on Moto G56 + one other mid-range device
+- [ ] Buffer-rebuild delay after STT (~25s) — investigate shortening
+- [ ] Barge-in: interrupt Hark's TTS mid-sentence (requires acoustic echo cancellation research)
+
+### 4. Better STT
+
+Status: `[ ]`
+
+System `SpeechRecognizer` works but has ceilings:
+- [ ] Evaluate whisper.cpp / sherpa-onnx for fully on-device recognition
+- [ ] Eliminate the Android system beep on listen start
+- [ ] Enable true continuous listening without the ~30s timeout
+
+### 5. Release Packaging
+
+Status: `[ ]`
+
+- [ ] Proper release signing config (currently uses debug key — GitHub issue #2)
+- [ ] GitHub Releases APK publishing
+- [ ] F-Droid submission once release signing is stable
 
 ---
 
 ## Completed Milestones
 
-### Two-Stage Pipeline `[x]`
+### Wake Word Detection `[x]` — PR #18
 
-Replaced single FunctionGemma 270M model with:
-- EmbeddingGemma 308M for semantic intent matching (MTEB 61.15)
-- Qwen3 0.5B for parameter extraction
-- 9-point improvement over previous e5-small-v2 embedding model
+- On-device "Hey Hark" detection via openWakeWord + Silero VAD + ONNX Runtime
+- Custom-trained `hey_harkh.onnx` (201KB) with shared melspectrogram + embedding preprocessors
+- Pigeon APIs: `startWakeWordService`, `stopWakeWordService`, `isWakeWordRunning`, `setWakeWordPaused`
+- Mutual exclusion with STT: wake word engine pauses while speech recognition is active, resumes after
+
+### Wake Word Robustness `[x]` — PR #19
+
+- **Foreground service** (`WakeWordService`) with `FOREGROUND_SERVICE_TYPE_MICROPHONE`, persistent notification, "Stop" action, `START_STICKY` restart
+- **Overlay launch on detection** via `VoiceInteractionService.showSession()` — system-sanctioned background activity path
+- **Recents cleanup**: `OverlayActivity` now `excludeFromRecents` + `noHistory`, no more duplicate task entries
+- **Lifecycle capability refresh**: `AppLifecycleListener` in `ChatNotifier` invalidates the registry and re-warms embeddings on app resume
+- `POST_NOTIFICATIONS` runtime request for Android 13+
+- Monochrome `ic_notification` vector drawable (Hark robot silhouette)
+
+### Assistant Overlay `[x]` — PR #17
+
+- Dedicated translucent `OverlayActivity` (separate from `MainActivity`)
+- `FlutterEngineGroup` with two engines: main (full app, all models) + overlay (thin UI shell, zero models)
+- Chat bubbles with app icons, keyboard/mic toggle, auto-start mic on open
+- State relay between engines via native Pigeon bridge through `OverlayActivity`
+- `hark_platform` plugin (Pigeon) replacing all raw MethodChannel/EventChannel code
+- Native handlers migrated into the plugin: `OacpDiscoveryHandler`, `LocalModelStorageHandler`, `OacpResultReceiver` removed
+
+### Two-Stage NLU Pipeline `[x]`
+
+- Replaced single FunctionGemma 270M model with EmbeddingGemma 308M + Qwen3 0.5B
+- EmbeddingGemma ranks all discovered capabilities by semantic similarity (MTEB 61.15)
+- Qwen3 extracts parameters only for the selected action
+- 9-point improvement over the previous e5-small-v2 embedding model
+- Keyword / alias fast-path: zero-parameter commands (flashlight, pause, scan) skip the slot filler entirely
 
 ### Async Result Handling `[x]`
 
-Apps can return data to Hark without the user leaving:
-- Native BroadcastReceiver listens for `org.oacp.ACTION_RESULT`
+- Native `BroadcastReceiver` listens for `org.oacp.ACTION_RESULT`
 - Results displayed in chat + spoken via TTS
 - Request ID correlation for tracking
 
 ### Dynamic Tool-Calling Runtime `[x]`
 
-Discovered OACP capabilities become runtime tools for the on-device model:
+- Discovered OACP capabilities become runtime tools for the on-device model
 - EmbeddingGemma ranks all candidates by semantic similarity
 - Confidence gate filters weak matches before slot filling
 - Qwen3 extracts parameters only for the selected action
 
 ### System Assistant Integration `[x]`
 
-Hark qualifies as an Android default assistant:
-- VoiceInteractionService, SessionService, RecognitionService
-- RoleManager for ROLE_ASSISTANT on Android 10+
+- `VoiceInteractionService`, `VoiceInteractionSessionService`, `RecognitionService`
+- `RoleManager` for `ROLE_ASSISTANT` on Android 10+
 - Auto-listen on assistant gesture launch
 - Continuous listening mode
 
 ---
 
-## Future / Not Now
+## Deferred / Not Now
 
-These are intentionally deferred:
+These are intentionally deferred. Decisions are revisited once the near-term list ships.
 
-- Play Store submission and policy compliance
-- iOS support
-- Multi-intent utterances ("set an alarm and turn off the lights")
-- NPU/backend optimization before the inference provider layer is stable
+- **Self-hosted inference (Ollama, LM Studio)** — deprioritized. The two-stage local pipeline is good enough for current capabilities. Revisit once users hit a real quality ceiling.
+- **BYOK cloud (OpenAI, Gemini, Anthropic)** — same rationale. Defer until self-hosted lands or users demand cloud.
+- **Gemma 4 single-model pipeline** — waiting on `flutter_gemma` support and a clear win over the two-stage stack.
+- **Model loading perf migration (llamadart)** — the overlay architecture removed the cold-start UX pressure. Benchmark harness (`tools/quant_bench/`) and findings preserved in [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md). Slot-filling migration is killed (hardware-bound at ~28s/case on Moto G56). Embedder migration re-opens only if the splash screen becomes a priority again.
+- **Play Store submission** and policy compliance
+- **iOS support**
+- **Multi-intent utterances** ("set an alarm and turn off the lights")
+- **NPU/backend optimization** until the provider layer is stable
+
+**Research preserved**:
+- [`docs/vision/hark-v2-agent-architecture.md`](docs/vision/hark-v2-agent-architecture.md): full v2 agent vision
+- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md): encoder-based slot tagging as a non-LLM alternative
+- [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md): hardware benchmark findings
+- [`docs/plans/llamadart-migration.md`](docs/plans/llamadart-migration.md): original 7-slice migration plan
 
 ---
 
 ## Long-term vision
 
-Hark's long-term direction is an **agent architecture** with memory, routines, ambient sensing, multi-turn conversation, and interruption handling, capable of running multi-step automations like "start the work drive" and handling interruptions like an incoming call pausing music and resuming after.
+Hark's long-term direction is an **agent architecture** with memory, routines, ambient sensing, multi-turn conversation, and interruption handling — capable of running multi-step automations like "start the work drive" and gracefully handling interruptions like an incoming call pausing music and resuming after.
 
-That architecture is the right long-term direction but intentionally deferred until the near-term foundation (fast load times, polished splash UX, floating overlay, wake word) is solid. Full research, first-principles toolbox, layered architecture, scenario walkthroughs, and pre-mortem are preserved in:
-
-- [`docs/vision/hark-v2-agent-architecture.md`](docs/vision/hark-v2-agent-architecture.md): the complete vision doc.
-- [`docs/vision/encoder-slot-filler-survey.md`](docs/vision/encoder-slot-filler-survey.md): research on encoder-based slot tagging as a non-LLM alternative for on-device parameter extraction.
-- [`docs/plans/llamadart-migration-findings.md`](docs/plans/llamadart-migration-findings.md): the hardware benchmark findings that shaped the vision (local generative slot filling is hardware-bound at ~28 s/case on mid-range Android; cloud or encoder NER are the viable paths).
-
-The v2 architecture is a hypothesis, not a commitment. It will be reconsidered once the near-term plan ships and there is real shipping data from Hark v1 about what users actually do.
+That architecture is the right long-term direction but intentionally deferred until the near-term foundation is polished and the product has real users. The v2 vision is a hypothesis, not a commitment. It will be reconsidered once there is real shipping data from Hark v1 about what users actually do.

@@ -140,6 +140,12 @@ class ChatNotifier extends Notifier<ChatState> {
       // Request notification permission so the wake word foreground
       // service can show its "Listening for Hey Hark" notification.
       // Required on Android 13+; silently no-ops on older versions.
+      //
+      // TODO: Move permission request BEFORE wake word service start so the
+      // first launch notification is immediately visible. Currently the
+      // service starts, user taps Allow, but the notification only appears
+      // on the next start (permission was denied when the FG service began).
+      // Self-heals on next launch but is a minor first-run UX wart.
       final notifStatus = await Permission.notification.status;
       if (!notifStatus.isGranted) {
         await Permission.notification.request();

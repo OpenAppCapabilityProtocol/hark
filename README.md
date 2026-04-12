@@ -77,9 +77,10 @@ Hark supports hands-free activation with the wake phrase **"Hey Hark"**. Wake wo
 
 - Works on any Android device, no special hardware required
 - Custom-trained wake word model (201KB ONNX), lightweight enough to run continuously
-- Detection auto-starts after app initialization and persists while the app is running
+- **Background foreground service** with a persistent "Listening for Hey Hark" notification so detection keeps running when the app is backgrounded or swiped from Recents
+- **Launches the overlay from any screen** via the system `VoiceInteractionService.showSession()` path — say "Hey Hark" anywhere and the assistant panel appears instantly
+- Notification has a **Stop** action to release the mic without relaunching the app
 - Mutually exclusive with speech-to-text: the wake word engine pauses while STT is active, then resumes after
-- Currently activates the in-app microphone; background service and overlay launch are coming next
 
 ## Getting Started
 
@@ -195,11 +196,11 @@ Hark is one implementation of OACP. The protocol is independent - any assistant 
 
 See [ROADMAP.md](ROADMAP.md) for the full plan. Key priorities:
 
-- **Self-hosted inference** - Connect Hark to Ollama/LM Studio on your local network for unlimited context and OACP.md consumption
-- **BYOK cloud** - Bring your own API key for OpenAI, Gemini, Anthropic
-- **Better STT** - Evaluate whisper.cpp / sherpa-onnx for on-device speech recognition
-- **Wake word** (in progress) - "Hey Hark" on-device detection shipped, background service and overlay trigger coming next
-- **Gemma 4** - Single-model replacement for the two-stage pipeline when flutter_gemma supports it
+- **Settings screen** - Permissions, wake word toggle, model info, about
+- **Action chips and disambiguation** - Tappable chips for capability help, disambiguation when top scores are close
+- **Wake word polish** - Sensitivity slider, privacy indicator, battery measurement, barge-in research
+- **Better STT** - Evaluate whisper.cpp / sherpa-onnx for fully on-device speech recognition
+- **Release packaging** - Proper signing, GitHub Releases, F-Droid submission
 
 ## Contributing
 
