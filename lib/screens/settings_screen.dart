@@ -77,6 +77,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   }
 
   Future<void> _openAssistantSettings() async {
+    // TODO: move openAssistantSettings() off ChatNotifier into a dedicated
+    // platform notifier so the Settings screen doesn't depend on chat state
+    // just to reach a system intent.
     await ref.read(chatProvider.notifier).openAssistantSettings();
   }
 
@@ -145,6 +148,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
 
           _SectionHeader('Models'),
+          // TODO: source model names + sizes from embeddingProvider /
+          // slotFillingProvider so they don't drift if the defaults change.
           const _InfoRow(
             icon: FIcons.brain,
             label: 'Intent selection',
