@@ -51,6 +51,9 @@ class WakeWordService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 Log.i(TAG, "Wake word service stopped")
+                // Return NOT_STICKY so Android doesn't auto-restart us
+                // after the user explicitly stopped.
+                return START_NOT_STICKY
             }
             ACTION_PAUSE -> {
                 detector?.pause()
@@ -102,17 +105,29 @@ class WakeWordService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
+        val contentPendingIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
+        // "Stop" action: sends ACTION_STOP to ourselves, which releases
+        // the mic and removes the notification.
+        val stopIntent = Intent(this, WakeWordService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE,
+        )
         return NotificationCompat.Builder(this, HarkApplication.WAKE_WORD_CHANNEL_ID)
             .setContentTitle("Hark")
             .setContentText("Listening for \"Hey Hark\"")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentIntent(pendingIntent)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(contentPendingIntent)
+            .addAction(0, "Stop", stopPendingIntent)
             .setOngoing(true)
             .build()
     }
