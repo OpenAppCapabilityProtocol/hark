@@ -22,7 +22,9 @@ hark/
 │   └── hark_platform/                           # Flutter plugin: Pigeon-based Dart/Kotlin bindings
 │       ├── pigeons/messages.dart                 # Pigeon schema (source of truth for all APIs)
 │       ├── lib/hark_platform.dart                # Generated + hand-written Dart API surface
-│       └── android/.../HarkPlatformPlugin.kt     # Kotlin host API implementations
+│       └── android/.../
+│           ├── HarkPlatformPlugin.kt             # Kotlin host API implementations (delegates wake word to WakeWordService)
+│           └── WakeWordDetector.kt               # openWakeWord engine wrapper (owned by WakeWordService in app module)
 ├── lib/
 │   ├── main.dart                               # Entry point: ProviderScope + MaterialApp.router + FTheme
 │   ├── overlay_main.dart                        # Overlay entrypoint (thin UI shell, no models)
@@ -77,13 +79,13 @@ hark/
 ├── embedding_model.onnx                          # openWakeWord embedding preprocessor (root-level)
 ├── android/app/src/main/kotlin/com/oacp/hark/
 │   ├── MainActivity.kt                          # Main FlutterActivity, hosts main engine
-│   ├── OverlayActivity.kt                       # Translucent FlutterActivity for assist overlay
-│   ├── HarkApplication.kt                       # Application subclass, owns FlutterEngineGroup
-│   ├── HarkVoiceInteractionService.kt           # Android system assistant service
+│   ├── OverlayActivity.kt                       # Translucent FlutterActivity for assist overlay (excludeFromRecents + noHistory)
+│   ├── HarkApplication.kt                       # Application subclass, FlutterEngineGroup owner, onWakeWordDetected → showSession()
+│   ├── HarkVoiceInteractionService.kt           # Android system assistant service (exposes static instance for overlay launch)
 │   ├── HarkSessionService.kt                    # Voice interaction session factory
 │   ├── HarkSession.kt                           # Session lifecycle (launches OverlayActivity)
 │   ├── HarkRecognitionService.kt                # Stub RecognitionService (required by Android)
-│   └── WakeWordDetector.kt                      # openWakeWord engine wrapper for "Hey Hark" detection
+│   └── WakeWordService.kt                       # Foreground Service owning WakeWordDetector, persistent notification, START_STICKY
 ├── cargokit_options.yaml                        # Forces precompiled flutter_embedder binaries
 ├── docs/                                         # Architecture and design docs
 │   └── plans/phase1-ui-redesign.md              # Phase 1 (forui + Riverpod + go_router) history
@@ -216,7 +218,7 @@ Hark uses a **FlutterEngineGroup** with two engines:
 
 **Session lifecycle:** When the assist gesture fires, `HarkSession` launches `OverlayActivity` instead of `MainActivity`. The overlay connects to the main engine via the native bridge, auto-starts the microphone, and presents the conversation UI. Dismissing the overlay finishes `OverlayActivity` without affecting the main engine.
 
-**Wake word (planned next phase):** Wake word detection ("Hey Hark") currently triggers in-app mic activation via `ChatNotifier`. The next phase will wire wake word detections to launch the overlay, so saying "Hey Hark" from any screen opens the assistant panel without touching the phone.
+**Wake word:** "Hey Hark" detection runs in a foreground Service (`WakeWordService`) in the app module with `FOREGROUND_SERVICE_TYPE_MICROPHONE` and a persistent notification. Detection survives swipe-from-recents via the `VoiceInteractionService` system binding plus `START_STICKY`. On detection the service pauses the detector (releasing the mic), then `HarkApplication.onWakeWordDetected()` calls `VoiceInteractionService.showSession()` — the system-sanctioned background activity launch — which triggers `HarkSession.onShow()` and the `OverlayActivity`. The overlay's `onOverlayOpened` callback auto-starts the mic. The notification has a "Stop" action that sends `ACTION_STOP` to the service, releasing the mic without relaunching the app.
 
 ---
 

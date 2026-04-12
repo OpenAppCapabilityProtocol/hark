@@ -80,6 +80,12 @@ class HarkApplication : Application() {
         } else {
             // Fallback: direct Activity launch (works when the app has a
             // foreground service, giving it foreground-equivalent priority).
+            // TODO: Android 12+ blocks background activity launches from
+            // Application context by default. This path relies on the wake
+            // word FG service granting BAL_ALLOW_FGS privilege. Untested
+            // when Hark is NOT the default assistant. If it fails silently
+            // we should post a notification with a full-screen intent
+            // instead of startActivity.
             Log.w(TAG, "VIS not available, launching OverlayActivity directly")
             val intent = Intent(this, OverlayActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)

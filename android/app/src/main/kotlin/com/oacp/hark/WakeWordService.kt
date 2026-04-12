@@ -33,6 +33,12 @@ class WakeWordService : Service() {
             ACTION_START -> {
                 if (detector?.isRunning == true) {
                     Log.d(TAG, "Already running, ignoring START")
+                    // TODO: still call startForeground here — if the caller
+                    // used startForegroundService, Android requires
+                    // startForeground within 5s or we hit
+                    // ForegroundServiceDidNotStartInTimeException. Current
+                    // Dart init path guards against double-start so the
+                    // risk is low, but safer to always foreground.
                     return START_STICKY
                 }
                 startForeground(

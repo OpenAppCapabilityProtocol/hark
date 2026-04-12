@@ -20,6 +20,9 @@ class HarkVoiceInteractionService : VoiceInteractionService() {
         private const val TAG = "HarkVIS"
 
         /** Live reference used by [HarkApplication.onWakeWordDetected] to launch the overlay. */
+        // TODO: mark @Volatile — onDestroy/onReady can race a wake word detection
+        // reading `instance` from the service thread. Very unlikely in practice
+        // but cheap to harden.
         var instance: HarkVoiceInteractionService? = null
             private set
     }
