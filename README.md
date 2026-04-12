@@ -81,6 +81,16 @@ Hark supports hands-free activation with the wake phrase **"Hey Hark"**. Wake wo
 - **Launches the overlay from any screen** via the system `VoiceInteractionService.showSession()` path — say "Hey Hark" anywhere and the assistant panel appears instantly
 - Notification has a **Stop** action to release the mic without relaunching the app
 - Mutually exclusive with speech-to-text: the wake word engine pauses while STT is active, then resumes after
+- Toggle on/off from the in-app **Settings** screen — the preference persists across cold starts
+
+## Settings
+
+Hark has an in-app Settings screen (gear icon in the chat header) with:
+
+- **Permissions** — live status for microphone, notifications, and the default assistant role, each with a one-tap fix button
+- **Wake word** — On/Off toggle with persistent preference, plus model and threshold info
+- **Models** — read-only rows for EmbeddingGemma 308M and Qwen3 0.6B
+- **About** — app version, OACP protocol version, GitHub link
 
 ## Getting Started
 
@@ -196,7 +206,6 @@ Hark is one implementation of OACP. The protocol is independent - any assistant 
 
 See [ROADMAP.md](ROADMAP.md) for the full plan. Key priorities:
 
-- **Settings screen** - Permissions, wake word toggle, model info, about
 - **Action chips and disambiguation** - Tappable chips for capability help, disambiguation when top scores are close
 - **Wake word polish** - Sensitivity slider, privacy indicator, battery measurement, barge-in research
 - **Better STT** - Evaluate whisper.cpp / sherpa-onnx for fully on-device speech recognition

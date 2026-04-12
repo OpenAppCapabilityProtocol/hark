@@ -28,6 +28,7 @@ For the OACP protocol roadmap, see [OpenAppCapabilityProtocol/oacp](https://gith
 - **Wake word foreground service** with persistent notification, Stop action, and `START_STICKY` restart
 - **Wake word → overlay launch** via `VoiceInteractionService.showSession()` (system-sanctioned background activity path)
 - **Lifecycle capability refresh**: OACP registry re-scans on app resume, so uninstalled apps drop out without a restart
+- **Settings screen** with permissions status, wake word toggle (persistent), model info, and about (PR #21)
 
 ---
 
@@ -35,19 +36,7 @@ For the OACP protocol roadmap, see [OpenAppCapabilityProtocol/oacp](https://gith
 
 The near-term foundation (overlay, wake word, two-stage NLU) is shipped. Current focus is polish, user-facing controls, and a few targeted UX gaps before scope expands.
 
-### 1. Settings Screen
-
-Status: `[ ]`
-
-Users currently have no in-app way to inspect permissions, toggle wake word, or see model status. This is the next thing to build.
-
-- [ ] `/settings` route with forui tiles
-- [ ] Permissions section (live status + tap to grant): mic, notifications, default assistant
-- [ ] Wake word toggle (start/stop service) with persistent preference
-- [ ] Model info (embedding, slot filling, wake word versions)
-- [ ] About section (version, OACP spec link, GitHub link)
-
-### 2. Action Chips and Disambiguation
+### 1. Action Chips and Disambiguation
 
 Status: `[ ]`
 
@@ -56,7 +45,7 @@ Status: `[ ]`
 - [ ] Follow-up suggestion chips after successful actions
 - [ ] Protocol-driven: chip content comes from discovered OACP actions, not hardcoded
 
-### 3. Wake Word — polish + barge-in
+### 2. Wake Word — polish + barge-in
 
 Status: `[-]`
 
@@ -68,7 +57,7 @@ Core detection, foreground service, and overlay launch all shipped (PR #18 and P
 - [ ] Buffer-rebuild delay after STT (~25s) — investigate shortening
 - [ ] Barge-in: interrupt Hark's TTS mid-sentence (requires acoustic echo cancellation research)
 
-### 4. Better STT
+### 3. Better STT
 
 Status: `[ ]`
 
@@ -77,7 +66,7 @@ System `SpeechRecognizer` works but has ceilings:
 - [ ] Eliminate the Android system beep on listen start
 - [ ] Enable true continuous listening without the ~30s timeout
 
-### 5. Release Packaging
+### 4. Release Packaging
 
 Status: `[ ]`
 
@@ -88,6 +77,14 @@ Status: `[ ]`
 ---
 
 ## Completed Milestones
+
+### Settings Screen `[x]` — PR #21
+
+- `/settings` route reachable from a gear icon in the chat header
+- Permissions section: live status for mic, notifications, default assistant, with Grant/Open/Set buttons that fall through to app settings when permanently denied
+- Wake word toggle (labeled On/Off) backed by `SettingsNotifier` + `SharedPreferences`; `ChatNotifier` gates its init-time wake word start on the pref so "off" survives cold starts
+- Models section with read-only rows for EmbeddingGemma 308M, Qwen3 0.6B, and the `hey_harkh.onnx` wake word model
+- About section with version (`package_info_plus`), OACP protocol badge, GitHub link (`url_launcher`)
 
 ### Wake Word Detection `[x]` — PR #18
 

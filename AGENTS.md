@@ -47,11 +47,13 @@ hark/
 │   │   ├── init_notifier.dart                  # Aggregates embedding + slot + registry into isReady
 │   │   ├── chat_state.dart                     # ChatMessage, ChatRole, InputMode, ChatState data classes
 │   │   ├── chat_notifier.dart                  # Notifier<ChatState>, all chat business logic
+│   │   ├── settings_notifier.dart              # AsyncNotifier<SettingsState>, wake word pref persistence
 │   │   └── app_icon_provider.dart              # FutureProvider.family<AppInfo?, String> (installed_apps)
 │   ├── screens/
 │   │   ├── splash_screen.dart                  # Dark branded splash with per-model progress rows
 │   │   ├── chat_screen.dart                    # ConsumerStatefulWidget, forui FScaffold + composer
 │   │   ├── available_actions_screen.dart       # Capabilities browser: FAccordion + per-app icons
+│   │   ├── settings_screen.dart                # Permissions / wake word toggle / models / about
 │   │   ├── overlay_screen.dart                 # Overlay UI: chat bubbles with app icons, mic/keyboard toggle
 │   │   └── widgets/                             # Presentational widgets (no Riverpod, no business logic)
 │   │       ├── mic_button.dart                  # 80px circular mic with pulse + press scale
