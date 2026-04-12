@@ -15,7 +15,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.plugin.common.BinaryMessenger
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -58,8 +57,6 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         HarkCommonApi.setUp(binding.binaryMessenger, null)
-        wakeWordDetector?.release()
-        wakeWordDetector = null
         resultReceiver?.unregister()
         resultReceiver = null
         resultFlutterApi = null
@@ -376,45 +373,35 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
     }
 
     // ── HarkCommonApi: wake word detection ─────────────────────
+    //
+    // Wake word detection runs in a foreground Service (WakeWordService)
+    // in the main app module. This plugin acts as a control interface,
+    // sending intent actions to start/stop/pause/resume the service.
 
-    private var wakeWordDetector: WakeWordDetector? = null
-
-    // TODO: startWakeWordService silently fails if context is null (detached
-    // engine). Consider returning a Result or throwing so Dart knows it failed.
     override fun startWakeWordService() {
         val ctx = context ?: return
-        if (wakeWordDetector?.isRunning == true) return
-
-        val detector = WakeWordDetector(ctx)
-        detector.start(
-            listener = WakeWordDetector.Listener {
-                // Notify Dart that wake word was detected.
-                resultFlutterApi?.onWakeWordDetected { }
-            },
-            modelPath = "wakeword/hey_harkh.onnx",
-            threshold = 0.3f,
-        )
-        wakeWordDetector = detector
-        Log.i(TAG, "Wake word service started")
+        ctx.startForegroundService(wakeWordIntent(ctx, "com.oacp.hark.WAKE_WORD_START"))
     }
 
     override fun stopWakeWordService() {
-        wakeWordDetector?.release()
-        wakeWordDetector = null
-        Log.i(TAG, "Wake word service stopped")
+        val ctx = context ?: return
+        ctx.startService(wakeWordIntent(ctx, "com.oacp.hark.WAKE_WORD_STOP"))
     }
 
-    override fun isWakeWordRunning(): Boolean {
-        return wakeWordDetector?.isRunning == true
-    }
+    override fun isWakeWordRunning(): Boolean = wakeWordRunning
 
     override fun setWakeWordPaused(paused: Boolean) {
-        if (paused) {
-            wakeWordDetector?.pause()
-        } else {
-            wakeWordDetector?.resume()
-        }
+        val ctx = context ?: return
+        val action = if (paused) "com.oacp.hark.WAKE_WORD_PAUSE"
+                     else "com.oacp.hark.WAKE_WORD_RESUME"
+        ctx.startService(wakeWordIntent(ctx, action))
     }
+
+    private fun wakeWordIntent(ctx: Context, action: String): Intent =
+        Intent().apply {
+            setClassName(ctx, "com.oacp.hark.WakeWordService")
+            this.action = action
+        }
 
     // ── OACP result receiver (BroadcastReceiver → FlutterApi) ────
 
@@ -469,5 +456,13 @@ class HarkPlatformPlugin : FlutterPlugin, HarkCommonApi {
 
     companion object {
         private const val TAG = "HarkPlatform"
+
+        /**
+         * Set by [WakeWordService] in the app module to report running state.
+         * Avoids cross-module class references while staying in the same process.
+         */
+        @Volatile
+        @JvmStatic
+        var wakeWordRunning: Boolean = false
     }
 }

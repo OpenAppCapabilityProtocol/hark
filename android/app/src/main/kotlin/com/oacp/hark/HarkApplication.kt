@@ -1,7 +1,16 @@
 package com.oacp.hark
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Intent
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.service.voice.VoiceInteractionSession
 import android.util.Log
+import com.oacp.hark_platform.HarkResultFlutterApi
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -25,8 +34,12 @@ class HarkApplication : Application() {
     lateinit var engineGroup: FlutterEngineGroup
         private set
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     override fun onCreate() {
         super.onCreate()
+
+        createNotificationChannels()
 
         engineGroup = FlutterEngineGroup(this)
 
@@ -35,6 +48,50 @@ class HarkApplication : Application() {
         FlutterEngineCache.getInstance().put(MAIN_ENGINE_ID, mainEngine)
 
         Log.i(TAG, "Main FlutterEngine created and cached")
+    }
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                WAKE_WORD_CHANNEL_ID,
+                "Wake Word Detection",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "Shows when Hark is listening for the wake word"
+            }
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Called by [WakeWordService] when "Hey Hark" is detected.
+     * Launches the overlay via [VoiceInteractionService.showSession] (the
+     * system-sanctioned path, exempt from background activity restrictions)
+     * and notifies the main engine's Dart side via Pigeon.
+     */
+    fun onWakeWordDetected() {
+        Log.i(TAG, "Wake word detected — launching overlay")
+
+        // Launch overlay via VoiceInteractionService if available.
+        val vis = HarkVoiceInteractionService.instance
+        if (vis != null) {
+            vis.showSession(Bundle.EMPTY, VoiceInteractionSession.SHOW_WITH_ASSIST)
+        } else {
+            // Fallback: direct Activity launch (works when the app has a
+            // foreground service, giving it foreground-equivalent priority).
+            Log.w(TAG, "VIS not available, launching OverlayActivity directly")
+            val intent = Intent(this, OverlayActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            startActivity(intent)
+        }
+
+        // Notify Dart so ChatNotifier knows the wake word fired.
+        val mainEngine = FlutterEngineCache.getInstance()
+            .get(MAIN_ENGINE_ID) ?: return
+        val api = HarkResultFlutterApi(mainEngine.dartExecutor.binaryMessenger)
+        mainHandler.post { api.onWakeWordDetected { } }
     }
 
     /**
@@ -73,5 +130,6 @@ class HarkApplication : Application() {
         private const val TAG = "HarkApplication"
         const val MAIN_ENGINE_ID = "main"
         const val OVERLAY_ENGINE_ID = "overlay"
+        const val WAKE_WORD_CHANNEL_ID = "wake_word"
     }
 }
