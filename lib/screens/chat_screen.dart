@@ -66,6 +66,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             variant: FButtonVariant.ghost,
             child: const Icon(FIcons.listChecks),
           ),
+          FButton.icon(
+            onPress: () => context.push(HarkRoutes.settings),
+            variant: FButtonVariant.ghost,
+            child: const Icon(FIcons.settings),
+          ),
         ],
       ),
       child: Column(
