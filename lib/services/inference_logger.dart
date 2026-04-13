@@ -17,6 +17,19 @@ class InferenceLogEntry {
   final String? errorMessage;
   final int elapsedMs;
 
+  /// Stage-1 (embedding rank) latency in ms. Null on fast-path hits or
+  /// pre-rank failures (no actions registered).
+  final int? stage1Ms;
+
+  /// Stage-2 (slot fill) latency in ms. Null when stage 2 was not reached
+  /// (fast path, gating failure, no actions).
+  final int? stage2Ms;
+
+  /// Identifier for the stage-2 backend that produced the parameters.
+  /// Today: `qwen3_local` or `fast_path`. Future: `openai_compat`,
+  /// `anthropic`, `cache`, etc.
+  final String? stage2Backend;
+
   const InferenceLogEntry({
     required this.timestamp,
     required this.modelId,
@@ -29,6 +42,9 @@ class InferenceLogEntry {
     this.errorType,
     this.errorMessage,
     required this.elapsedMs,
+    this.stage1Ms,
+    this.stage2Ms,
+    this.stage2Backend,
   });
 
   Map<String, dynamic> toJson() => {
@@ -44,6 +60,9 @@ class InferenceLogEntry {
         if (errorType != null) 'error_type': errorType,
         if (errorMessage != null) 'error_message': errorMessage,
         'elapsed_ms': elapsedMs,
+        if (stage1Ms != null) 'stage1_ms': stage1Ms,
+        if (stage2Ms != null) 'stage2_ms': stage2Ms,
+        if (stage2Backend != null) 'stage2_backend': stage2Backend,
       };
 }
 

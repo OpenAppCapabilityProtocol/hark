@@ -32,6 +32,7 @@ class LoggingCommandResolver implements CommandResolver {
     final result = await _delegate.resolveCommand(transcript, actions);
     stopwatch.stop();
 
+    final metrics = result.metrics;
     await _logger.log(InferenceLogEntry(
       timestamp: DateTime.now(),
       modelId: result.modelId ?? fallbackModelId,
@@ -44,6 +45,9 @@ class LoggingCommandResolver implements CommandResolver {
       errorType: result.errorType?.name,
       errorMessage: result.message,
       elapsedMs: stopwatch.elapsedMilliseconds,
+      stage1Ms: metrics?['stage1_ms'] as int?,
+      stage2Ms: metrics?['stage2_ms'] as int?,
+      stage2Backend: metrics?['stage2_backend'] as String?,
     ));
 
     return result;

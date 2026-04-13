@@ -81,11 +81,18 @@ class NluCommandResolver implements CommandResolver {
     String transcript,
     List<AssistantAction> actions,
   ) async {
+    // Per-resolution metrics threaded out via [CommandResolutionResult] so
+    // [LoggingCommandResolver] can log per-stage timings without scraping
+    // logs. Keys: stage1_ms (embedding rank), stage2_ms (slot fill),
+    // stage2_backend ('qwen3_local' / 'fast_path' / future cloud backends).
+    final metrics = <String, dynamic>{};
+
     if (actions.isEmpty) {
       return CommandResolutionResult.failure(
         CommandResolutionErrorType.unavailable,
         message: 'No OACP actions are registered yet.',
         modelId: modelId,
+        metrics: metrics,
       );
     }
 
@@ -96,6 +103,7 @@ class NluCommandResolver implements CommandResolver {
     // models have finished loading.
     final fastPath = _tryKeywordFastPath(transcript, actions);
     if (fastPath != null) {
+      metrics['stage2_backend'] = 'fast_path';
       _debugLog('resolve_fast_path', {
         'transcript': transcript,
         'modelId': modelId,
@@ -113,10 +121,18 @@ class NluCommandResolver implements CommandResolver {
         },
         confirmationMessage: fastPath.confirmationMessage,
       );
-      return CommandResolutionResult.success(resolved, modelId: modelId);
+      return CommandResolutionResult.success(
+        resolved,
+        modelId: modelId,
+        metrics: metrics,
+      );
     }
 
+    final swStage1 = Stopwatch()..start();
     final rankedOptions = await _rankActions(transcript, actions);
+    swStage1.stop();
+    metrics['stage1_ms'] = swStage1.elapsedMilliseconds;
+
     _debugLog('resolve_ranked', {
       'transcript': transcript,
       'modelId': modelId,
@@ -140,6 +156,7 @@ class NluCommandResolver implements CommandResolver {
         CommandResolutionErrorType.noMatch,
         message: 'No matching action was found.',
         modelId: modelId,
+        metrics: metrics,
       );
     }
 
@@ -156,6 +173,7 @@ class NluCommandResolver implements CommandResolver {
         CommandResolutionErrorType.noMatch,
         message: 'No matching action was found.',
         modelId: modelId,
+        metrics: metrics,
       );
     }
 
@@ -174,18 +192,25 @@ class NluCommandResolver implements CommandResolver {
         CommandResolutionErrorType.noMatch,
         message: 'The command was too ambiguous to match confidently.',
         modelId: modelId,
+        metrics: metrics,
       );
     }
 
     // Layer 2: Slot filling via on-device LLM.
+    // TODO(byok): when cloud routing lands, the backend label here will be
+    // determined by which slotFill closure was injected, not hardcoded.
     final action = best.action;
     final Map<String, dynamic>? parameters;
+    final swStage2 = Stopwatch()..start();
     try {
       parameters = await slotFill(
         transcript: transcript,
         action: action,
       );
     } on StateError {
+      swStage2.stop();
+      metrics['stage2_ms'] = swStage2.elapsedMilliseconds;
+      metrics['stage2_backend'] = 'qwen3_local';
       _debugLog('resolve_declined', {
         'transcript': transcript,
         'modelId': modelId,
@@ -196,8 +221,12 @@ class NluCommandResolver implements CommandResolver {
         CommandResolutionErrorType.unavailable,
         message: 'The slot-filling model is not available.',
         modelId: modelId,
+        metrics: metrics,
       );
     }
+    swStage2.stop();
+    metrics['stage2_ms'] = swStage2.elapsedMilliseconds;
+    metrics['stage2_backend'] = 'qwen3_local';
 
     if (parameters == null) {
       _debugLog('resolve_declined', {
@@ -210,6 +239,7 @@ class NluCommandResolver implements CommandResolver {
         CommandResolutionErrorType.invalidResponse,
         message: 'The selected action is missing required parameters.',
         modelId: modelId,
+        metrics: metrics,
       );
     }
 
@@ -229,7 +259,11 @@ class NluCommandResolver implements CommandResolver {
       'score': best.score,
       'parameters': resolved.parameters,
     });
-    return CommandResolutionResult.success(resolved, modelId: modelId);
+    return CommandResolutionResult.success(
+      resolved,
+      modelId: modelId,
+      metrics: metrics,
+    );
   }
 
   bool _isConfidentMatch(List<_RankedAction> rankedOptions) {
