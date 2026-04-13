@@ -30,7 +30,25 @@ class SettingsNotifier extends AsyncNotifier<SettingsState> {
     ref.onDispose(sub.cancel);
 
     final prefs = await SharedPreferences.getInstance();
-    final wakeWordEnabled = prefs.getBool(_kWakeWordEnabled) ?? true;
+    var wakeWordEnabled = prefs.getBool(_kWakeWordEnabled) ?? true;
+
+    // Reconcile pref with actual service state. Handles the case where the
+    // service was stopped (notification Stop, system kill, crash) while
+    // SettingsNotifier wasn't built — the broadcast stream event would have
+    // been dropped, leaving the pref stale.
+    if (wakeWordEnabled) {
+      try {
+        final running = await _commonApi.isWakeWordRunning();
+        if (!running) {
+          debugPrint('SettingsNotifier: pref says on but service dead — reconciling');
+          await prefs.setBool(_kWakeWordEnabled, false);
+          wakeWordEnabled = false;
+        }
+      } catch (e) {
+        debugPrint('SettingsNotifier: isWakeWordRunning check failed: $e');
+      }
+    }
+
     return SettingsState(wakeWordEnabled: wakeWordEnabled);
   }
 

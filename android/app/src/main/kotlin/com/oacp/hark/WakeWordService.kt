@@ -51,15 +51,19 @@ class WakeWordService : Service() {
                 Log.i(TAG, "Wake word service started")
             }
             ACTION_STOP -> {
+                val fromNotification = intent.getBooleanExtra(EXTRA_FROM_NOTIFICATION, false)
                 detector?.release()
                 detector = null
                 HarkPlatformPlugin.wakeWordRunning = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
-                Log.i(TAG, "Wake word service stopped")
-                // Notify Dart so SettingsNotifier can sync the toggle.
-                // Safe to call on all stop paths — the Dart handler is idempotent.
-                (application as HarkApplication).onWakeWordServiceStopped()
+                Log.i(TAG, "Wake word service stopped (fromNotification=$fromNotification)")
+                // Only notify Dart when the stop came from the notification.
+                // Dart-initiated stops already own their own state update —
+                // firing the callback there races with rapid re-enable.
+                if (fromNotification) {
+                    (application as HarkApplication).onWakeWordServiceStopped()
+                }
                 // Return NOT_STICKY so Android doesn't auto-restart us
                 // after the user explicitly stopped.
                 return START_NOT_STICKY
@@ -121,9 +125,12 @@ class WakeWordService : Service() {
             PendingIntent.FLAG_IMMUTABLE,
         )
         // "Stop" action: sends ACTION_STOP to ourselves, which releases
-        // the mic and removes the notification.
+        // the mic and removes the notification. The fromNotification flag
+        // tells the handler to fire the Dart sync callback (skipped on
+        // Dart-initiated stops to avoid a re-enable race).
         val stopIntent = Intent(this, WakeWordService::class.java).apply {
             action = ACTION_STOP
+            putExtra(EXTRA_FROM_NOTIFICATION, true)
         }
         val stopPendingIntent = PendingIntent.getService(
             this,
@@ -147,6 +154,7 @@ class WakeWordService : Service() {
         const val ACTION_STOP = "com.oacp.hark.WAKE_WORD_STOP"
         const val ACTION_PAUSE = "com.oacp.hark.WAKE_WORD_PAUSE"
         const val ACTION_RESUME = "com.oacp.hark.WAKE_WORD_RESUME"
+        const val EXTRA_FROM_NOTIFICATION = "com.oacp.hark.EXTRA_FROM_NOTIFICATION"
         const val NOTIFICATION_ID = 1001
     }
 }
