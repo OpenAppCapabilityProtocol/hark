@@ -57,6 +57,9 @@ class WakeWordService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 Log.i(TAG, "Wake word service stopped")
+                // Notify Dart so SettingsNotifier can sync the toggle.
+                // Safe to call on all stop paths — the Dart handler is idempotent.
+                (application as HarkApplication).onWakeWordServiceStopped()
                 // Return NOT_STICKY so Android doesn't auto-restart us
                 // after the user explicitly stopped.
                 return START_NOT_STICKY

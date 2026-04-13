@@ -179,4 +179,7 @@ abstract class HarkMainFlutterApi {
 abstract class HarkResultFlutterApi {
   void onOacpResult(OacpResultMessage result);
   void onWakeWordDetected();
+  /// Called when the wake word service is stopped externally (e.g. via the
+  /// notification "Stop" action), so Dart can sync the settings toggle.
+  void onWakeWordServiceStopped();
 }

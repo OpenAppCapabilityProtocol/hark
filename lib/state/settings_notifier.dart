@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hark_platform/hark_platform.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'services_providers.dart';
+
 const _kWakeWordEnabled = 'wake_word_enabled';
 
 /// User-tunable settings backed by [SharedPreferences].
@@ -16,6 +18,17 @@ class SettingsNotifier extends AsyncNotifier<SettingsState> {
 
   @override
   Future<SettingsState> build() async {
+    // Subscribe to external service-stopped events (e.g. notification "Stop"
+    // button). Updates pref + state so the toggle stays in sync.
+    final resultService = ref.read(oacpResultServiceProvider);
+    final sub = resultService.wakeWordServiceStopped.listen((_) async {
+      debugPrint('SettingsNotifier: wake word service stopped externally');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kWakeWordEnabled, false);
+      state = const AsyncData(SettingsState(wakeWordEnabled: false));
+    });
+    ref.onDispose(sub.cancel);
+
     final prefs = await SharedPreferences.getInstance();
     final wakeWordEnabled = prefs.getBool(_kWakeWordEnabled) ?? true;
     return SettingsState(wakeWordEnabled: wakeWordEnabled);
