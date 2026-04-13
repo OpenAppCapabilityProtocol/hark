@@ -101,6 +101,19 @@ class HarkApplication : Application() {
     }
 
     /**
+     * Called by [WakeWordService] when the service is stopped via the
+     * notification "Stop" action (i.e. stopped externally, not from Dart).
+     * Notifies the main engine so [SettingsNotifier] can sync the toggle.
+     */
+    fun onWakeWordServiceStopped() {
+        Log.i(TAG, "Wake word service stopped externally — notifying Dart")
+        val mainEngine = FlutterEngineCache.getInstance()
+            .get(MAIN_ENGINE_ID) ?: return
+        val api = HarkResultFlutterApi(mainEngine.dartExecutor.binaryMessenger)
+        mainHandler.post { api.onWakeWordServiceStopped { } }
+    }
+
+    /**
      * Returns the cached overlay engine, or creates one on first call.
      *
      * The overlay engine runs the `overlayMain` Dart entrypoint and shares

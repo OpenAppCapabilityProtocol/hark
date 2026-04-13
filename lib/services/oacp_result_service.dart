@@ -56,9 +56,13 @@ class OacpResultService implements HarkResultFlutterApi {
 
   final _resultController = StreamController<OacpResult>.broadcast();
   final _wakeWordController = StreamController<void>.broadcast();
+  final _wakeWordStoppedController = StreamController<void>.broadcast();
 
   Stream<OacpResult> get results => _resultController.stream;
   Stream<void> get wakeWordDetections => _wakeWordController.stream;
+  /// Fires when the wake word service is stopped externally (e.g. notification
+  /// "Stop" button), so listeners can sync UI state.
+  Stream<void> get wakeWordServiceStopped => _wakeWordStoppedController.stream;
 
   @override
   void onOacpResult(OacpResultMessage result) {
@@ -70,9 +74,15 @@ class OacpResultService implements HarkResultFlutterApi {
     _wakeWordController.add(null);
   }
 
+  @override
+  void onWakeWordServiceStopped() {
+    _wakeWordStoppedController.add(null);
+  }
+
   void dispose() {
     HarkResultFlutterApi.setUp(null);
     _resultController.close();
     _wakeWordController.close();
+    _wakeWordStoppedController.close();
   }
 }
