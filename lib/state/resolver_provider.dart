@@ -56,7 +56,14 @@ final commandResolverProvider = Provider<CommandResolver>((ref) {
     embedDocument: (text) async =>
         ref.read(embeddingProvider.notifier).embedDocument(text),
     slotFill: ({required transcript, required action}) async {
-      final mode = ref.read(cloudProviderNotifierProvider).mode;
+      // Env-bootstrap (--dart-define AZURE_*) overrides the stored mode
+      // so a developer running locally for first-pass cloud telemetry
+      // gets cloud-preferred behavior without a settings UI. Once the
+      // Cloud Brain screen lands in Slice 5, the stored mode wins.
+      final storedMode = ref.read(cloudProviderNotifierProvider).mode;
+      final mode = hasEnvCloudBootstrap
+          ? CloudRoutingMode.cloudPreferred
+          : storedMode;
       final cloud = ref.read(cloudSlotFillerProvider);
 
       // No cloud configured OR user wants local-only → straight to local.

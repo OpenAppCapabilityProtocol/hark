@@ -43,6 +43,16 @@ CloudProviderConfig? _envConfigOrNull() {
   );
 }
 
+/// True when the compile-time AZURE_* dart-defines are all set. The
+/// resolver wiring treats this as an implicit `cloudPreferred` mode
+/// override so a developer running with env vars doesn't also have to
+/// flip a mode toggle that doesn't have a UI yet.
+bool get hasEnvCloudBootstrap =>
+    _envBaseUrl.isNotEmpty &&
+    _envApiKey.isNotEmpty &&
+    _envModel.isNotEmpty &&
+    _envApiVersion.isNotEmpty;
+
 /// Builds a [CloudSlotFiller] from whichever cloud config source has
 /// one to offer. Source precedence:
 ///
