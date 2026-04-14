@@ -23,11 +23,12 @@ dependencies:
   # Values are encrypted with a hardware-bound key; see README for the
   # rooted-device caveat (flutter_secure_storage#947).
   flutter_secure_storage: ^9.2.2
-  # OpenAI-compatible client for stage-2 cloud slot fill (BYOK Slice 3).
-  # Covers OpenAI direct, Azure OpenAI (via baseUrl + AzureApiKeyProvider
-  # + apiVersion), Gemini compat endpoint, and custom OpenAI-compatible
-  # backends (OpenRouter, vLLM, LiteLLM, etc.) with one client surface.
-  openai_dart: ^4.0.1
+  # Direct HTTP for the cloud slot-fill adapter. We POST one well-known
+  # shape (chat/completions with tools + tool_choice) per call, so a
+  # ~50-line http wrapper beats pulling in a provider-abstraction
+  # package whose Azure auth defaults bit us in Slice 5 (sent api-key
+  # header instead of Bearer; mismatched our Foundry deployment).
+  http: ^1.2.0
   path_provider: ^2.1.0
   forui: ^0.20.4
   flutter_riverpod: ^3.3.1

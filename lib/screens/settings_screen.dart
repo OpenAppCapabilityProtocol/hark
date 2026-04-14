@@ -7,7 +7,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../router/hark_router.dart';
 import '../state/chat_notifier.dart';
+import '../state/cloud_provider_notifier.dart';
 import '../state/settings_notifier.dart';
 
 /// User-facing settings surface.
@@ -145,6 +147,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             icon: FIcons.gauge,
             label: 'Threshold',
             value: '0.3 (cooldown 1500 ms)',
+          ),
+
+          _SectionHeader('Cloud brain (beta)'),
+          _CloudBrainRow(
+            state: ref.watch(cloudProviderNotifierProvider),
+            onTap: () => context.push(HarkRoutes.cloudBrain),
           ),
 
           _SectionHeader('Models'),
@@ -418,6 +426,38 @@ class _Row extends StatelessWidget {
           const SizedBox(width: 12),
           trailing,
         ],
+      ),
+    );
+  }
+}
+
+class _CloudBrainRow extends StatelessWidget {
+  const _CloudBrainRow({required this.state, required this.onTap});
+
+  final CloudProviderState state;
+  final Future<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final config = state.config;
+    final configured = config != null;
+    final description = configured
+        ? 'Foundry · ${config.model} · ${state.mode.wireName}'
+        : 'Send stage 2 to your own Azure / Foundry deployment.';
+    return FTappable(
+      onPress: onTap,
+      child: _Row(
+        icon: FIcons.cloud,
+        label: 'Foundry cloud',
+        description: description,
+        trailing: configured
+            ? _StatusPill(text: 'On', ok: true)
+            : Icon(
+                FIcons.chevronRight,
+                size: 16,
+                color: colors.mutedForeground,
+              ),
       ),
     );
   }
