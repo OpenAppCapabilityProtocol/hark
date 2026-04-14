@@ -12,7 +12,7 @@
 /// (baseUrl + apiKey + model). Only [AzureConfig] adds `apiVersion`.
 /// After Slice 4 lands and we know the real adapter shape, consider
 /// collapsing to `CloudProviderConfig(kind, baseUrl, apiKey, model,
-/// extras: Map<String,String>)`. The "type safety" of the sealed union
+/// extras: Map\<String,String\>)`. The "type safety" of the sealed union
 /// is illusory — the adapter already runtime-switches on `kind` for
 /// auth header selection, and downcasting to reach `apiVersion` is the
 /// same runtime check as `extras['api_version']`. Only keep the sealed
@@ -183,7 +183,7 @@ sealed class CloudProviderConfig {
   /// additional sensitive fields.
   @override
   String toString() =>
-      '${runtimeType}(baseUrl: $baseUrl, model: $model, apiKey: <redacted>)';
+      '$runtimeType(baseUrl: $baseUrl, model: $model, apiKey: <redacted>)';
 }
 
 /// Vanilla OpenAI direct. Auth via `Authorization: Bearer`.

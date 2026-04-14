@@ -35,9 +35,14 @@ abstract class HarkLlmClient {
   /// validated parameter map on success, `null` on schema-validation
   /// failure, throws [CloudUnavailableError] / [CloudHardError] on
   /// other failure modes.
+  ///
+  /// [timeout] is the upper bound on the call. Adapters may have their
+  /// own internal timeouts but must honor this one as the hard cap.
+  /// Default 4s — short enough to let the local fallback fire within
+  /// the user's tolerance window in CLOUD_PREFERRED mode.
   Future<Map<String, dynamic>?> extract({
     required String transcript,
     required AssistantAction action,
-    Duration timeout,
+    Duration timeout = const Duration(seconds: 4),
   });
 }

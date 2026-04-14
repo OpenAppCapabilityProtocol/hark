@@ -118,6 +118,14 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
     ];
 
     // 3. POST chat/completions with the tool, forcing its invocation.
+    // Grep-friendly request log: `adb logcat | grep HarkCloudReq` to
+    // verify on-device. Never logs the API key — just enough to debug.
+    final stopwatch = Stopwatch()..start();
+    debugPrint(
+      'HarkCloudReq: kind=${_config.kind.wireName} '
+      'baseUrl=${_config.baseUrl} model=${_config.model} '
+      'action=$functionName transcript="$transcript"',
+    );
     final ChatCompletion response;
     try {
       response = await _client.chat.completions
@@ -135,8 +143,28 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
         'Cloud request timed out after ${timeout.inSeconds}s',
         cause: e,
       );
-    } on OpenAIClientException catch (e) {
-      throw _mapClientException(e);
+    } on NotFoundException catch (e) {
+      // Deployment / model not found — user must fix config.
+      throw CloudHardError(
+        'Provider returned 404 — check your base URL and model / '
+        'deployment name. Original message: ${e.message}',
+        cause: e,
+      );
+    } on ApiException catch (e) {
+      // 401 / 429 / 4xx (other) / 5xx — recoverable, fall back in
+      // CLOUD_PREFERRED.
+      throw CloudUnavailableError(
+        e.message,
+        cause: e,
+        statusCode: e.statusCode,
+      );
+    } on OpenAIException catch (e) {
+      // Catches: ConnectionException, RequestTimeoutException,
+      // ParseException, AbortedException — all recoverable.
+      throw CloudUnavailableError(
+        'Cloud transport error: ${e.message}',
+        cause: e,
+      );
     } catch (e) {
       throw CloudUnavailableError(
         'Cloud request failed: $e',
@@ -172,7 +200,14 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
     // 5. Validate against the OACP schema with the same coercion rules
     //    as the local path. Returns null if required slots are missing
     //    — resolver maps that to slot_filling_failed.
-    return _validator.validateMap(argsMap, action);
+    final validated = _validator.validateMap(argsMap, action);
+    stopwatch.stop();
+    debugPrint(
+      'HarkCloudRes: ${stopwatch.elapsedMilliseconds}ms '
+      'action=$functionName args=$argsMap '
+      'validated=${validated != null}',
+    );
+    return validated;
   }
 
   /// Build a compact system prompt for the extraction call. Keeps the
@@ -201,28 +236,9 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
     return lines.join('\n');
   }
 
-  /// Map an [OpenAIClientException] to the appropriate cloud error.
-  /// 401 / 429 / 5xx / network → recoverable (fall back to local in
-  /// CLOUD_PREFERRED). 404 → hard (user must fix config).
-  Exception _mapClientException(OpenAIClientException e) {
-    final code = e.code;
-    if (code == 404) {
-      return CloudHardError(
-        'Provider returned 404 — check your base URL and model / '
-        'deployment name. Original message: ${e.message}',
-        cause: e,
-      );
-    }
-    return CloudUnavailableError(
-      e.message,
-      cause: e,
-      statusCode: code,
-    );
-  }
-
-  /// Release the underlying HTTP client. Adapters live for the
-  /// lifetime of the cloud config so this is rarely called outside of
-  /// tests.
+  /// Release the underlying HTTP client. Slice 4 should call this in
+  /// `ref.onDispose` when the cloud config changes so old clients don't
+  /// leak.
   void close() {
     _client.close();
   }
