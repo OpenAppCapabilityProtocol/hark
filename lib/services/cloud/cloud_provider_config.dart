@@ -8,6 +8,23 @@
 /// and the settings UI can dispatch on auth style — not so we can bake
 /// vendor defaults into the data model.
 ///
+/// TODO(byok-simplify): 5 subclasses but 4 are structurally identical
+/// (baseUrl + apiKey + model). Only [AzureConfig] adds `apiVersion`.
+/// After Slice 4 lands and we know the real adapter shape, consider
+/// collapsing to `CloudProviderConfig(kind, baseUrl, apiKey, model,
+/// extras: Map<String,String>)`. The "type safety" of the sealed union
+/// is illusory — the adapter already runtime-switches on `kind` for
+/// auth header selection, and downcasting to reach `apiVersion` is the
+/// same runtime check as `extras['api_version']`. Only keep the sealed
+/// shape if a provider with structurally different fields shows up
+/// (e.g. AWS Bedrock with region + access_key_id + secret + session).
+///
+/// TODO(byok-schema-version): Persistence blobs have no `_version`
+/// field today. Adding one now (`_version: 1`) would be free insurance
+/// for future wire-format changes — impossible to retrofit cleanly
+/// once existing installs have blobs without it. Bundle with the
+/// sealed-union refactor above or do standalone.
+///
 /// Stored in `flutter_secure_storage` via [CloudProviderNotifier]. The
 /// API key is the only field that MUST live in secure storage; the rest
 /// could live in shared prefs, but keeping everything together
@@ -116,6 +133,10 @@ sealed class CloudProviderConfig {
 
   CloudProviderKind get kind;
 
+  // TODO(byok-log-audit): `toJson` returns the raw apiKey for
+  // persistence. Any future code doing `debugPrint('${cfg.toJson()}')`
+  // would leak the key. Audit / lint when Slice 6 lands its verbose-
+  // logging toggle.
   Map<String, dynamic> toJson();
 
   /// Parse a previously-persisted config blob. Throws [ArgumentError]

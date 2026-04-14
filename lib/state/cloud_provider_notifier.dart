@@ -55,6 +55,12 @@ class CloudProviderState {
 /// mode. Reads from secure storage on build, persists changes eagerly,
 /// and emits `null` config when no key is present.
 ///
+/// TODO(byok-notifier-test): The load/save flow here is not unit-tested
+/// because `FlutterSecureStorage` is hard to mock. Slice 4 will
+/// exercise it live. If the adapter work exposes subtle bugs in the
+/// read/write race handling, add a dedicated test with a mocked
+/// secure-storage impl.
+///
 /// Intentionally not an [AsyncNotifier] — we want the resolver to be
 /// able to read the current state synchronously via `ref.read` during
 /// slot filling (Slice 4 wires this up), which an AsyncNotifier would
@@ -75,6 +81,10 @@ class CloudProviderNotifier extends Notifier<CloudProviderState> {
     // Consumers who need the loaded state can `await` [awaitInitialLoad]
     // once after construction; the resolver (Slice 4) will call it
     // during app init so the steady-state path is synchronous.
+    //
+    // TODO(byok-cleanup): `??=` is defensive dead code — `Notifier.build`
+    // runs exactly once per instance lifetime. Drop when confidence is
+    // high that no code path re-enters `build()`.
     _initialLoad ??= _loadFromStorage();
     return const CloudProviderState(
       config: null,
