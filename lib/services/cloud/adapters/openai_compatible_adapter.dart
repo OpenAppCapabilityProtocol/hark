@@ -139,33 +139,49 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
           )
           .timeout(timeout);
     } on TimeoutException catch (e) {
+      debugPrint(
+        'HarkCloudErr: timeout after ${timeout.inSeconds}s '
+        'kind=${_config.kind.wireName}',
+      );
       throw CloudUnavailableError(
         'Cloud request timed out after ${timeout.inSeconds}s',
         cause: e,
       );
     } on NotFoundException catch (e) {
-      // Deployment / model not found — user must fix config.
+      debugPrint(
+        'HarkCloudErr: 404 kind=${_config.kind.wireName} '
+        'baseUrl=${_config.baseUrl} model=${_config.model} '
+        'message=${e.message} type=${e.type} code=${e.code} '
+        'body=${e.body}',
+      );
       throw CloudHardError(
-        'Provider returned 404 — check your base URL and model / '
-        'deployment name. Original message: ${e.message}',
+        'Provider returned 404 — check your base URL, deployment name '
+        '(${_config.model}), and api-version. Azure said: ${e.message}',
         cause: e,
       );
     } on ApiException catch (e) {
-      // 401 / 429 / 4xx (other) / 5xx — recoverable, fall back in
-      // CLOUD_PREFERRED.
+      debugPrint(
+        'HarkCloudErr: HTTP ${e.statusCode} kind=${_config.kind.wireName} '
+        'baseUrl=${_config.baseUrl} model=${_config.model} '
+        'message=${e.message} type=${e.type} code=${e.code} '
+        'body=${e.body}',
+      );
       throw CloudUnavailableError(
         e.message,
         cause: e,
         statusCode: e.statusCode,
       );
     } on OpenAIException catch (e) {
-      // Catches: ConnectionException, RequestTimeoutException,
-      // ParseException, AbortedException — all recoverable.
+      debugPrint(
+        'HarkCloudErr: transport kind=${_config.kind.wireName} '
+        'message=${e.message} cause=${e.cause}',
+      );
       throw CloudUnavailableError(
         'Cloud transport error: ${e.message}',
         cause: e,
       );
     } catch (e) {
+      debugPrint('HarkCloudErr: unknown kind=${_config.kind.wireName} $e');
       throw CloudUnavailableError(
         'Cloud request failed: $e',
         cause: e,
