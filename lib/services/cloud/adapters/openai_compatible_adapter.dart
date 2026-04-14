@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:openai_dart/openai_dart.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../models/assistant_action.dart';
 import '../cloud_errors.dart';
@@ -11,16 +11,28 @@ import '../hark_llm_client.dart';
 import '../oacp_to_tool_schema.dart';
 import '../slot_result_validator.dart';
 
-/// Cloud slot filler that targets any OpenAI-compatible backend.
+/// Cloud slot filler that targets any OpenAI-compatible chat/completions
+/// endpoint via direct HTTP. Replaces the previous `openai_dart`-based
+/// implementation — we POST one well-known shape per call, so the
+/// provider-abstraction package was net-negative (its Azure auth
+/// defaults bit us with the wrong header for Foundry serverless
+/// endpoints, and we couldn't see the actual request bytes).
 ///
-/// Covers in one client:
-/// - OpenAI direct (`api.openai.com/v1`) via `Authorization: Bearer`
-/// - Azure OpenAI (classic per-deployment URL or v1/Foundry surface)
-///   via `api-key` header + `?api-version=...` query param
+/// Supported in one client:
+/// - OpenAI direct (`api.openai.com/v1`)
+/// - Azure / Foundry serverless (`*.cognitiveservices.azure.com/openai/deployments/{name}`
+///   or `*.services.ai.azure.com/...`)
 /// - Gemini OpenAI-compat endpoint
-///   (`generativelanguage.googleapis.com/v1beta/openai`) via Bearer
+///   (`generativelanguage.googleapis.com/v1beta/openai`)
 /// - Custom OpenAI-compatible backends (OpenRouter, LiteLLM, vLLM,
-///   Together, Groq, self-hosted) via Bearer
+///   Together, Groq, self-hosted)
+///
+/// Auth: `Authorization: Bearer {apiKey}` for every provider. Microsoft
+/// surfaces both `api-key:` and `Authorization: Bearer` in their Azure
+/// docs depending on which template generated them; the Foundry-managed
+/// flavor (used by every modern model deployment in 2026) wants Bearer.
+/// If a future user has a legacy classic Azure OpenAI deployment that
+/// only accepts `api-key:`, we'll add a UI toggle then.
 ///
 /// Anthropic is NOT handled here — its native `tool_use` shape needs
 /// the dedicated [AnthropicAdapter] (Slice 7).
@@ -30,74 +42,46 @@ import '../slot_result_validator.dart';
 ///    via [OacpToToolSchema].
 /// 2. Build a system prompt with extraction instructions + entity
 ///    context (aliases, known entities) from the same translator.
-/// 3. POST chat/completions with `tools=[tool]`,
-///    `tool_choice=function(name)` so the model is forced to call our
-///    tool (no chit-chat).
-/// 4. Parse `tool_calls[0].function.arguments` (JSON string).
+/// 3. POST `{baseUrl}/chat/completions[?api-version=...]` with
+///    `tools=[tool]`, `tool_choice=function(name)` so the model is
+///    forced to call our tool (no chit-chat).
+/// 4. Parse `choices[0].message.tool_calls[0].function.arguments`
+///    (JSON string).
 /// 5. Validate via [SlotResultValidator] — same coercion rules as the
 ///    on-device path.
-///
-/// Failures map to the [HarkLlmClient] failure semantics:
-/// - Network / 5xx / malformed JSON → [CloudUnavailableError]
-/// - 401 → [CloudUnavailableError] (recoverable: fix key in settings;
-///   immediate fallback in CLOUD_PREFERRED is desired)
-/// - 404 → [CloudHardError] (deployment / model not found, user must
-///   fix it)
-/// - Schema with no parameters / unsupported config → [CloudHardError]
-/// - Validated map missing required slots → return null (matches local
-///   path's `slot_filling_failed`)
 class OpenAiCompatibleAdapter implements HarkLlmClient {
-  OpenAiCompatibleAdapter(this._config)
-      : _client = _buildClient(_config),
+  OpenAiCompatibleAdapter(
+    this._config, {
+    http.Client? httpClient,
+  })  : _http = httpClient ?? http.Client(),
+        _ownsClient = httpClient == null,
         _translator = const OacpToToolSchema(),
         _validator = const SlotResultValidator();
 
   final CloudProviderConfig _config;
-  final OpenAIClient _client;
+  final http.Client _http;
+  final bool _ownsClient;
   final OacpToToolSchema _translator;
   final SlotResultValidator _validator;
 
-  /// Build an [OpenAIClient] from a [CloudProviderConfig]. Dispatches
-  /// on `kind` to pick the right auth provider and wire the api-version
-  /// query param for Azure.
-  ///
-  /// **Auth header note for Azure:** Foundry serverless endpoints
-  /// (which is how the Azure portal deploys gpt-4.1-mini and most newer
-  /// models in 2026) expect `Authorization: Bearer {key}`, NOT the
-  /// `api-key:` header that classic Azure OpenAI Service uses. Microsoft
-  /// surfaces both auth styles in their docs depending on which
-  /// deployment template the model uses, but the URL looks identical.
-  /// Sending `api-key:` to a Bearer-expecting endpoint produces a 404
-  /// (path lookup fails) instead of a clean 401, which makes the
-  /// failure mode confusing.
-  ///
-  /// We default Azure to `ApiKeyProvider` (Bearer) because that's what
-  /// every Foundry-deployed model in the user's Azure account currently
-  /// expects. If a future user has a legacy classic Azure OpenAI
-  /// deployment that only accepts `api-key:`, we'll add a UI toggle
-  /// then.
-  static OpenAIClient _buildClient(CloudProviderConfig config) {
-    switch (config.kind) {
-      case CloudProviderKind.azureOpenAi:
-      case CloudProviderKind.openai:
-      case CloudProviderKind.gemini:
-      case CloudProviderKind.customOpenAi:
-        final apiVersion = config is AzureConfig ? config.apiVersion : null;
-        return OpenAIClient(
-          config: OpenAIConfig(
-            baseUrl: config.baseUrl,
-            authProvider: ApiKeyProvider(config.apiKey),
-            apiVersion: apiVersion,
-            timeout: const Duration(seconds: 15),
-          ),
-        );
+  /// Build the full POST URL: `{baseUrl}/chat/completions` with
+  /// optional `?api-version=...` query for Azure. We do this by hand
+  /// rather than using `Uri.resolve` because resolve mishandles base
+  /// URLs whose last segment looks like a path component (e.g.
+  /// `/openai/deployments/{name}` would lose `{name}` on resolve).
+  Uri _chatCompletionsUri() {
+    final base = _config.baseUrl.endsWith('/')
+        ? _config.baseUrl.substring(0, _config.baseUrl.length - 1)
+        : _config.baseUrl;
+    final pathJoined = '$base/chat/completions';
+    final uri = Uri.parse(pathJoined);
 
-      case CloudProviderKind.anthropic:
-        throw CloudHardError(
-          'Anthropic is not handled by OpenAiCompatibleAdapter. '
-          'Use AnthropicAdapter (Slice 7) instead.',
-        );
+    final config = _config;
+    final apiVersion = config is AzureConfig ? config.apiVersion : null;
+    if (apiVersion != null && apiVersion.isNotEmpty) {
+      return uri.replace(queryParameters: {'api-version': apiVersion});
     }
+    return uri;
   }
 
   @override
@@ -106,110 +90,127 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
     required AssistantAction action,
     Duration timeout = const Duration(seconds: 4),
   }) async {
+    if (_config.kind == CloudProviderKind.anthropic) {
+      throw CloudHardError(
+        'Anthropic is not handled by OpenAiCompatibleAdapter. '
+        'Use AnthropicAdapter (Slice 7) instead.',
+      );
+    }
+
     // 1. Translate OACP schema → OpenAI tool definition.
     final toolJson = _translator.translate(action);
     final functionDef = toolJson['function'] as Map<String, dynamic>;
     final functionName = functionDef['name'] as String;
-    final tool = Tool.function(
-      name: functionName,
-      description: functionDef['description'] as String,
-      parameters: functionDef['parameters'] as Map<String, dynamic>,
-    );
 
-    // 2. Build messages: system prompt with entity context, then user
-    //    transcript verbatim. Force the tool call so the model can't
-    //    answer in prose.
+    // 2. System prompt + user message body.
     final systemPrompt = _buildSystemPrompt(action);
-    final messages = [
-      ChatMessage.system(systemPrompt),
-      ChatMessage.user(transcript),
-    ];
+    final body = <String, dynamic>{
+      'model': _config.model,
+      'messages': [
+        {'role': 'system', 'content': systemPrompt},
+        {'role': 'user', 'content': transcript},
+      ],
+      'tools': [toolJson],
+      'tool_choice': {
+        'type': 'function',
+        'function': {'name': functionName},
+      },
+    };
 
-    // 3. POST chat/completions with the tool, forcing its invocation.
-    // Grep-friendly request log: `adb logcat | grep HarkCloudReq` to
-    // verify on-device. Never logs the API key — just enough to debug.
+    final url = _chatCompletionsUri();
+
+    // Grep-friendly request log: `adb logcat | grep HarkCloudReq`.
+    // Never logs the API key.
     final stopwatch = Stopwatch()..start();
     debugPrint(
       'HarkCloudReq: kind=${_config.kind.wireName} '
-      'baseUrl=${_config.baseUrl} model=${_config.model} '
-      'action=$functionName transcript="$transcript"',
+      'url=$url model=${_config.model} action=$functionName '
+      'transcript="$transcript"',
     );
-    final ChatCompletion response;
+
+    final http.Response response;
     try {
-      response = await _client.chat.completions
-          .create(
-            ChatCompletionCreateRequest(
-              model: _config.model,
-              messages: messages,
-              tools: [tool],
-              toolChoice: ToolChoice.function(functionName),
-            ),
+      response = await _http
+          .post(
+            url,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ${_config.apiKey}',
+            },
+            body: jsonEncode(body),
           )
           .timeout(timeout);
     } on TimeoutException catch (e) {
       debugPrint(
-        'HarkCloudErr: timeout after ${timeout.inSeconds}s '
-        'kind=${_config.kind.wireName}',
+        'HarkCloudErr: timeout after ${timeout.inSeconds}s url=$url',
       );
       throw CloudUnavailableError(
         'Cloud request timed out after ${timeout.inSeconds}s',
         cause: e,
       );
-    } on NotFoundException catch (e) {
-      debugPrint(
-        'HarkCloudErr: 404 kind=${_config.kind.wireName} '
-        'baseUrl=${_config.baseUrl} model=${_config.model} '
-        'message=${e.message} type=${e.type} code=${e.code} '
-        'body=${e.body}',
-      );
-      throw CloudHardError(
-        'Provider returned 404 — check your base URL, deployment name '
-        '(${_config.model}), and api-version. Azure said: ${e.message}',
-        cause: e,
-      );
-    } on ApiException catch (e) {
-      debugPrint(
-        'HarkCloudErr: HTTP ${e.statusCode} kind=${_config.kind.wireName} '
-        'baseUrl=${_config.baseUrl} model=${_config.model} '
-        'message=${e.message} type=${e.type} code=${e.code} '
-        'body=${e.body}',
-      );
-      throw CloudUnavailableError(
-        e.message,
-        cause: e,
-        statusCode: e.statusCode,
-      );
-    } on OpenAIException catch (e) {
-      debugPrint(
-        'HarkCloudErr: transport kind=${_config.kind.wireName} '
-        'message=${e.message} cause=${e.cause}',
-      );
-      throw CloudUnavailableError(
-        'Cloud transport error: ${e.message}',
-        cause: e,
-      );
     } catch (e) {
-      debugPrint('HarkCloudErr: unknown kind=${_config.kind.wireName} $e');
+      debugPrint('HarkCloudErr: transport url=$url $e');
       throw CloudUnavailableError(
-        'Cloud request failed: $e',
+        'Cloud transport error: $e',
         cause: e,
       );
     }
 
-    // 4. Extract tool call arguments. We forced the call, so anything
-    //    else is malformed.
-    if (!response.hasToolCalls) {
+    if (response.statusCode >= 400) {
       debugPrint(
-        'OpenAiCompatibleAdapter: no tool call in response despite '
-        'tool_choice=function — finish_reason='
-        '${response.choices.first.finishReason}',
+        'HarkCloudErr: HTTP ${response.statusCode} url=$url '
+        'body=${response.body}',
+      );
+      if (response.statusCode == 404) {
+        throw CloudHardError(
+          'Provider returned 404 — check your base URL, deployment '
+          'name (${_config.model}), and api-version. Azure said: '
+          '${response.body}',
+        );
+      }
+      throw CloudUnavailableError(
+        'HTTP ${response.statusCode}: ${response.body}',
+        statusCode: response.statusCode,
+      );
+    }
+
+    // 3. Parse response.
+    Map<String, dynamic> json;
+    try {
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint(
+        'HarkCloudErr: malformed response body=${response.body}',
+      );
+      throw CloudUnavailableError(
+        'Provider response was not valid JSON',
+        cause: e,
+      );
+    }
+
+    final choices = json['choices'] as List?;
+    if (choices == null || choices.isEmpty) {
+      throw CloudUnavailableError(
+        'Provider response had no choices: ${response.body}',
+      );
+    }
+    final message =
+        (choices.first as Map<String, dynamic>)['message'] as Map<String, dynamic>?;
+    final toolCalls = message?['tool_calls'] as List?;
+    if (toolCalls == null || toolCalls.isEmpty) {
+      debugPrint(
+        'HarkCloudErr: no tool_calls in response despite tool_choice. '
+        'finish_reason=${(choices.first as Map)['finish_reason']} '
+        'body=${response.body}',
       );
       throw CloudUnavailableError(
         'Provider did not return a tool call',
       );
     }
-    final toolCall = response.allToolCalls.first;
-    final argsRaw = toolCall.function.arguments;
+
+    final firstCall = toolCalls.first as Map<String, dynamic>;
+    final fn = firstCall['function'] as Map<String, dynamic>;
+    final argsRaw = fn['arguments'] as String;
 
     Map<String, dynamic> argsMap;
     try {
@@ -221,7 +222,7 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
       );
     }
 
-    // 5. Validate against the OACP schema with the same coercion rules
+    // 4. Validate against the OACP schema with the same coercion rules
     //    as the local path. Returns null if required slots are missing
     //    — resolver maps that to slot_filling_failed.
     final validated = _validator.validateMap(argsMap, action);
@@ -260,10 +261,10 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
     return lines.join('\n');
   }
 
-  /// Release the underlying HTTP client. Slice 4 should call this in
-  /// `ref.onDispose` when the cloud config changes so old clients don't
-  /// leak.
+  /// Release the underlying HTTP client. Slice 4 wires this via
+  /// `ref.onDispose` so old clients don't leak when the cloud config
+  /// changes.
   void close() {
-    _client.close();
+    if (_ownsClient) _http.close();
   }
 }
