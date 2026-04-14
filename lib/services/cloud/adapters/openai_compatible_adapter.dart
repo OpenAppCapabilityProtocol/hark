@@ -60,26 +60,34 @@ class OpenAiCompatibleAdapter implements HarkLlmClient {
   /// Build an [OpenAIClient] from a [CloudProviderConfig]. Dispatches
   /// on `kind` to pick the right auth provider and wire the api-version
   /// query param for Azure.
+  ///
+  /// **Auth header note for Azure:** Foundry serverless endpoints
+  /// (which is how the Azure portal deploys gpt-4.1-mini and most newer
+  /// models in 2026) expect `Authorization: Bearer {key}`, NOT the
+  /// `api-key:` header that classic Azure OpenAI Service uses. Microsoft
+  /// surfaces both auth styles in their docs depending on which
+  /// deployment template the model uses, but the URL looks identical.
+  /// Sending `api-key:` to a Bearer-expecting endpoint produces a 404
+  /// (path lookup fails) instead of a clean 401, which makes the
+  /// failure mode confusing.
+  ///
+  /// We default Azure to `ApiKeyProvider` (Bearer) because that's what
+  /// every Foundry-deployed model in the user's Azure account currently
+  /// expects. If a future user has a legacy classic Azure OpenAI
+  /// deployment that only accepts `api-key:`, we'll add a UI toggle
+  /// then.
   static OpenAIClient _buildClient(CloudProviderConfig config) {
     switch (config.kind) {
       case CloudProviderKind.azureOpenAi:
-        final azure = config as AzureConfig;
-        return OpenAIClient(
-          config: OpenAIConfig(
-            baseUrl: azure.baseUrl,
-            authProvider: AzureApiKeyProvider(azure.apiKey),
-            apiVersion: azure.apiVersion,
-            timeout: const Duration(seconds: 15),
-          ),
-        );
-
       case CloudProviderKind.openai:
       case CloudProviderKind.gemini:
       case CloudProviderKind.customOpenAi:
+        final apiVersion = config is AzureConfig ? config.apiVersion : null;
         return OpenAIClient(
           config: OpenAIConfig(
             baseUrl: config.baseUrl,
             authProvider: ApiKeyProvider(config.apiKey),
+            apiVersion: apiVersion,
             timeout: const Duration(seconds: 15),
           ),
         );
