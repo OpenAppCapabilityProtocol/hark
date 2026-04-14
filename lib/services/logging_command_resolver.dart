@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/assistant_action.dart';
 import '../models/command_resolution.dart';
 import 'command_resolver.dart';
@@ -33,6 +35,15 @@ class LoggingCommandResolver implements CommandResolver {
     stopwatch.stop();
 
     final metrics = result.metrics;
+    // Grep-able metrics line for device verification without pulling log
+    // files: `adb logcat | grep HarkMetrics`.
+    debugPrint(
+      'HarkMetrics: total=${stopwatch.elapsedMilliseconds}ms '
+      'stage1=${metrics?['stage1_ms']}ms '
+      'stage2=${metrics?['stage2_ms']}ms '
+      'backend=${metrics?['stage2_backend']} '
+      'success=${result.isSuccess}',
+    );
     await _logger.log(InferenceLogEntry(
       timestamp: DateTime.now(),
       modelId: result.modelId ?? fallbackModelId,
