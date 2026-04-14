@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/assistant_action.dart';
 import '../models/command_resolution.dart';
 import 'command_resolver.dart';
@@ -32,6 +34,19 @@ class LoggingCommandResolver implements CommandResolver {
     final result = await _delegate.resolveCommand(transcript, actions);
     stopwatch.stop();
 
+    final metrics = result.metrics;
+    // Grep-able metrics line for device verification without pulling log
+    // files: `adb logcat | grep HarkMetrics`.
+    final stage1 = metrics?['stage1_ms'];
+    final stage2 = metrics?['stage2_ms'];
+    final backend = metrics?['stage2_backend'];
+    debugPrint(
+      'HarkMetrics: total=${stopwatch.elapsedMilliseconds}ms '
+      'stage1=${stage1 != null ? "${stage1}ms" : "-"} '
+      'stage2=${stage2 != null ? "${stage2}ms" : "-"} '
+      'backend=${backend ?? "-"} '
+      'success=${result.isSuccess}',
+    );
     await _logger.log(InferenceLogEntry(
       timestamp: DateTime.now(),
       modelId: result.modelId ?? fallbackModelId,
@@ -44,6 +59,9 @@ class LoggingCommandResolver implements CommandResolver {
       errorType: result.errorType?.name,
       errorMessage: result.message,
       elapsedMs: stopwatch.elapsedMilliseconds,
+      stage1Ms: metrics?['stage1_ms'] as int?,
+      stage2Ms: metrics?['stage2_ms'] as int?,
+      stage2Backend: metrics?['stage2_backend'] as String?,
     ));
 
     return result;
