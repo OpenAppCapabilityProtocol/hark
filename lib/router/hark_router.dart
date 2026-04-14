@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../screens/available_actions_screen.dart';
 import '../screens/chat_screen.dart';
+import '../screens/cloud_brain_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/splash_screen.dart';
 import '../state/init_notifier.dart';
@@ -17,6 +18,7 @@ class HarkRoutes {
   static const chat = '/chat';
   static const actions = '/actions';
   static const settings = '/settings';
+  static const cloudBrain = '/settings/cloud-brain';
 }
 
 /// Provides the app's singleton [GoRouter].
@@ -72,6 +74,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: HarkRoutes.settings,
         name: 'settings',
         builder: (_, _) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: HarkRoutes.cloudBrain,
+        name: 'cloud-brain',
+        builder: (_, _) => const CloudBrainScreen(),
       ),
     ],
   );
