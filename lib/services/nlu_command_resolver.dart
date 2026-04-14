@@ -13,9 +13,29 @@ import 'embedding_cache_store.dart';
 /// Async callable that embeds a query string and returns a vector.
 typedef EmbedFn = Future<List<double>?> Function(String text);
 
+/// Wraps the result of a slot-fill call so the resolver can record
+/// which backend produced the parameters in its per-stage metrics.
+///
+/// `params` is null when extraction failed (required slots missing,
+/// model returned malformed JSON, etc) — same null contract as the
+/// previous SlotFillFn shape. `backend` is a short identifier:
+/// `qwen3_local`, `openai_compat`, `anthropic`, `cache`, etc.
+class SlotFillOutcome {
+  const SlotFillOutcome({required this.params, required this.backend});
+
+  final Map<String, dynamic>? params;
+  final String backend;
+}
+
 /// Async callable that extracts parameters for a resolved action from a
-/// transcript, or returns null if required slots could not be filled.
-typedef SlotFillFn = Future<Map<String, dynamic>?> Function({
+/// transcript. Returns a [SlotFillOutcome] whose `params` field is null
+/// if required slots could not be filled.
+///
+/// Implementations may throw to signal hard failures (e.g.
+/// CloudUnavailableError / CloudHardError from cloud adapters) — the
+/// resolver still preserves the existing `StateError → unavailable`
+/// path for backward compatibility.
+typedef SlotFillFn = Future<SlotFillOutcome> Function({
   required String transcript,
   required AssistantAction action,
 });
@@ -196,21 +216,21 @@ class NluCommandResolver implements CommandResolver {
       );
     }
 
-    // Layer 2: Slot filling via on-device LLM.
-    // TODO(byok): when cloud routing lands, the backend label here will be
-    // determined by which slotFill closure was injected, not hardcoded.
+    // Layer 2: Slot filling via injected closure (local Qwen3, cloud
+    // adapter, or composite). The closure is responsible for choosing
+    // the backend; we just record which one it used.
     final action = best.action;
-    final Map<String, dynamic>? parameters;
+    final SlotFillOutcome outcome;
     final swStage2 = Stopwatch()..start();
     try {
-      parameters = await slotFill(
+      outcome = await slotFill(
         transcript: transcript,
         action: action,
       );
     } on StateError {
       swStage2.stop();
       metrics['stage2_ms'] = swStage2.elapsedMilliseconds;
-      metrics['stage2_backend'] = 'qwen3_local';
+      metrics['stage2_backend'] = 'unavailable';
       _debugLog('resolve_declined', {
         'transcript': transcript,
         'modelId': modelId,
@@ -226,7 +246,8 @@ class NluCommandResolver implements CommandResolver {
     }
     swStage2.stop();
     metrics['stage2_ms'] = swStage2.elapsedMilliseconds;
-    metrics['stage2_backend'] = 'qwen3_local';
+    metrics['stage2_backend'] = outcome.backend;
+    final parameters = outcome.params;
 
     if (parameters == null) {
       _debugLog('resolve_declined', {
