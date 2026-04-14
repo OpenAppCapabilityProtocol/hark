@@ -37,11 +37,14 @@ class LoggingCommandResolver implements CommandResolver {
     final metrics = result.metrics;
     // Grep-able metrics line for device verification without pulling log
     // files: `adb logcat | grep HarkMetrics`.
+    final stage1 = metrics?['stage1_ms'];
+    final stage2 = metrics?['stage2_ms'];
+    final backend = metrics?['stage2_backend'];
     debugPrint(
       'HarkMetrics: total=${stopwatch.elapsedMilliseconds}ms '
-      'stage1=${metrics?['stage1_ms']}ms '
-      'stage2=${metrics?['stage2_ms']}ms '
-      'backend=${metrics?['stage2_backend']} '
+      'stage1=${stage1 != null ? "${stage1}ms" : "-"} '
+      'stage2=${stage2 != null ? "${stage2}ms" : "-"} '
+      'backend=${backend ?? "-"} '
       'success=${result.isSuccess}',
     );
     await _logger.log(InferenceLogEntry(
