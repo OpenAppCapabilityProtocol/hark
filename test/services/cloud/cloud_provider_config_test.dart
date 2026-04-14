@@ -3,92 +3,82 @@ import 'package:hark/services/cloud/cloud_provider_config.dart';
 
 void main() {
   group('CloudProviderConfig round-trip', () {
-    test('OpenAiConfig round-trips with defaults', () {
-      const cfg = OpenAiConfig(apiKey: 'sk-test');
-      expect(cfg.model, 'gpt-4o-mini');
-      expect(cfg.baseUrl, 'https://api.openai.com/v1');
-
+    test('OpenAiConfig round-trips', () {
+      const cfg = OpenAiConfig(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        model: 'gpt-4o-mini',
+      );
       final restored = CloudProviderConfig.fromJson(cfg.toJson());
       expect(restored, isA<OpenAiConfig>());
+      expect(restored.baseUrl, 'https://api.openai.com/v1');
       expect(restored.apiKey, 'sk-test');
       expect(restored.model, 'gpt-4o-mini');
       expect(restored.kind, CloudProviderKind.openai);
     });
 
-    test('OpenAiConfig round-trips with custom model', () {
-      const cfg = OpenAiConfig(apiKey: 'sk-test', model: 'gpt-4o');
-      final restored = CloudProviderConfig.fromJson(cfg.toJson());
-      expect(restored.model, 'gpt-4o');
-    });
-
     test('AzureConfig round-trips with all fields', () {
       const cfg = AzureConfig(
+        baseUrl: 'https://my-resource.openai.azure.com/openai/v1',
         apiKey: 'az-test',
-        resourceName: 'my-resource',
         model: 'hark-extract-mini',
         apiVersion: '2024-12-01',
-      );
-      expect(
-        cfg.baseUrl,
-        'https://my-resource.openai.azure.com/openai/v1',
       );
 
       final json = cfg.toJson();
       expect(json['kind'], 'azure');
-      expect(json['resource_name'], 'my-resource');
+      expect(
+        json['base_url'],
+        'https://my-resource.openai.azure.com/openai/v1',
+      );
       expect(json['api_version'], '2024-12-01');
 
       final restored = CloudProviderConfig.fromJson(json) as AzureConfig;
+      expect(
+        restored.baseUrl,
+        'https://my-resource.openai.azure.com/openai/v1',
+      );
       expect(restored.apiKey, 'az-test');
-      expect(restored.resourceName, 'my-resource');
       expect(restored.model, 'hark-extract-mini');
       expect(restored.apiVersion, '2024-12-01');
     });
 
-    test('AzureConfig.fromJson defaults missing api_version', () {
-      final json = {
-        'kind': 'azure',
-        'api_key': 'az',
-        'model': 'gpt-4o-mini',
-        'resource_name': 'r',
-      };
-      final restored = CloudProviderConfig.fromJson(json) as AzureConfig;
-      expect(restored.apiVersion, '2024-10-21');
-    });
-
-    test('GeminiConfig round-trips with defaults', () {
-      const cfg = GeminiConfig(apiKey: 'gm-test');
-      expect(cfg.model, 'gemini-2.5-flash-lite');
-      expect(
-        cfg.baseUrl,
-        'https://generativelanguage.googleapis.com/v1beta/openai',
+    test('GeminiConfig round-trips', () {
+      const cfg = GeminiConfig(
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: 'gm-test',
+        model: 'gemini-2.5-flash-lite',
       );
-
       final restored = CloudProviderConfig.fromJson(cfg.toJson());
       expect(restored, isA<GeminiConfig>());
+      expect(
+        restored.baseUrl,
+        'https://generativelanguage.googleapis.com/v1beta/openai',
+      );
       expect(restored.model, 'gemini-2.5-flash-lite');
     });
 
-    test('AnthropicConfig round-trips with defaults', () {
-      const cfg = AnthropicConfig(apiKey: 'ant-test');
-      expect(cfg.model, 'claude-haiku-4-5');
-      expect(cfg.baseUrl, 'https://api.anthropic.com/v1');
-
+    test('AnthropicConfig round-trips', () {
+      const cfg = AnthropicConfig(
+        baseUrl: 'https://api.anthropic.com/v1',
+        apiKey: 'ant-test',
+        model: 'claude-haiku-4-5',
+      );
       final restored = CloudProviderConfig.fromJson(cfg.toJson());
       expect(restored, isA<AnthropicConfig>());
+      expect(restored.baseUrl, 'https://api.anthropic.com/v1');
+      expect(restored.model, 'claude-haiku-4-5');
     });
 
-    test('CustomOpenAiConfig round-trips with user-supplied URL', () {
+    test('CustomOpenAiConfig round-trips', () {
       const cfg = CustomOpenAiConfig(
+        baseUrl: 'https://openrouter.ai/api/v1',
         apiKey: 'or-test',
         model: 'mistral-7b',
-        customBaseUrl: 'https://openrouter.ai/api/v1',
       );
-      expect(cfg.baseUrl, 'https://openrouter.ai/api/v1');
-
       final restored =
           CloudProviderConfig.fromJson(cfg.toJson()) as CustomOpenAiConfig;
-      expect(restored.customBaseUrl, 'https://openrouter.ai/api/v1');
+      expect(restored.baseUrl, 'https://openrouter.ai/api/v1');
       expect(restored.model, 'mistral-7b');
     });
   });
@@ -108,19 +98,31 @@ void main() {
     });
 
     test('unknown kind returns null', () {
-      const raw = '{"kind": "nonexistent", "api_key": "x", "model": "y"}';
+      const raw =
+          '{"kind": "nonexistent", "base_url": "x", "api_key": "y", "model": "z"}';
       expect(CloudProviderConfig.fromJsonString(raw), isNull);
     });
 
     test('missing required field returns null', () {
-      // AzureConfig requires resource_name — missing field surfaces as
+      // AzureConfig requires api_version — missing field surfaces as
       // a TypeError during field extraction, caught by fromJsonString.
-      const raw = '{"kind": "azure", "api_key": "x", "model": "y"}';
+      const raw =
+          '{"kind": "azure", "base_url": "x", "api_key": "y", "model": "z"}';
+      expect(CloudProviderConfig.fromJsonString(raw), isNull);
+    });
+
+    test('missing base_url returns null', () {
+      const raw =
+          '{"kind": "openai", "api_key": "sk-test", "model": "gpt-4o-mini"}';
       expect(CloudProviderConfig.fromJsonString(raw), isNull);
     });
 
     test('valid round-trip via toJsonString / fromJsonString', () {
-      const cfg = OpenAiConfig(apiKey: 'sk-test');
+      const cfg = OpenAiConfig(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        model: 'gpt-4o-mini',
+      );
       final raw = cfg.toJsonString();
       final restored = CloudProviderConfig.fromJsonString(raw);
       expect(restored, isNotNull);
@@ -129,13 +131,23 @@ void main() {
     });
   });
 
+  group('CloudProviderConfig.toString redacts apiKey', () {
+    test('does not include apiKey', () {
+      const cfg = OpenAiConfig(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-very-secret-key',
+        model: 'gpt-4o-mini',
+      );
+      expect(cfg.toString(), isNot(contains('sk-very-secret-key')));
+      expect(cfg.toString(), contains('<redacted>'));
+      expect(cfg.toString(), contains('gpt-4o-mini'));
+    });
+  });
+
   group('CloudProviderKind / CloudRoutingMode wire names', () {
     test('CloudProviderKind.fromWireName round-trips all values', () {
       for (final kind in CloudProviderKind.values) {
-        expect(
-          CloudProviderKind.fromWireName(kind.wireName),
-          kind,
-        );
+        expect(CloudProviderKind.fromWireName(kind.wireName), kind);
       }
     });
 
@@ -148,10 +160,7 @@ void main() {
 
     test('CloudRoutingMode.fromWireName round-trips all values', () {
       for (final mode in CloudRoutingMode.values) {
-        expect(
-          CloudRoutingMode.fromWireName(mode.wireName),
-          mode,
-        );
+        expect(CloudRoutingMode.fromWireName(mode.wireName), mode);
       }
     });
 
