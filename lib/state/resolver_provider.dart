@@ -56,6 +56,16 @@ final commandResolverProvider = Provider<CommandResolver>((ref) {
     embedDocument: (text) async =>
         ref.read(embeddingProvider.notifier).embedDocument(text),
     slotFill: ({required transcript, required action}) async {
+      // Make sure the secure-storage-backed cloud config has been
+      // loaded at least once. Without this, the first voice command
+      // after a cold start sees the notifier's default empty state
+      // (because _loadFromStorage is fire-and-forget in build()) and
+      // routes to local even when the user has a saved config.
+      // Idempotent + cached after the first call.
+      await ref
+          .read(cloudProviderNotifierProvider.notifier)
+          .awaitInitialLoad();
+
       // Env-bootstrap (--dart-define AZURE_*) overrides the stored mode
       // so a developer running locally for first-pass cloud telemetry
       // gets cloud-preferred behavior without a settings UI. Once the
